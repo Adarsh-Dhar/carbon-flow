@@ -1,6 +1,9 @@
 from crewai import Agent
 from crewai.tools.base_tool import Tool
 from src.tools import cpcb_tools, nasa_tools, dss_tools, storage_tools
+from src.utils.env_config import configure_llm_from_env
+
+configure_llm_from_env()
 
 
 cpcb_fetch_tool = Tool(
