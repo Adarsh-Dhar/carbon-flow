@@ -23,6 +23,11 @@ def _with_debug_logs(tool_name: str, func: Callable[..., Any]) -> Callable[..., 
     """Wrap tool functions with debug logging for inputs and outputs."""
 
     def wrapper(*args: Any, **kwargs: Any) -> Any:
+        # Ensure TOOL_RESULT_CACHE is always a dict
+        global TOOL_RESULT_CACHE
+        if TOOL_RESULT_CACHE is None or not isinstance(TOOL_RESULT_CACHE, dict):
+            TOOL_RESULT_CACHE = {}
+        
         timestamp = datetime.utcnow().isoformat()
         debug_kwargs = dict(kwargs)
         security_context = debug_kwargs.pop("security_context", None)
@@ -30,19 +35,30 @@ def _with_debug_logs(tool_name: str, func: Callable[..., Any]) -> Callable[..., 
             f"[DEBUG {timestamp}] Tool `{tool_name}` invoked "
             f"with args={args} kwargs={debug_kwargs} security_context={security_context}"
         )
-        result = func(*args, **debug_kwargs)
-        TOOL_RESULT_CACHE[tool_name] = result
-        print(
-            f"[DEBUG {timestamp}] Tool `{tool_name}` completed "
-            f"with result_type={type(result).__name__}"
-        )
-        return result
+        try:
+            result = func(*args, **debug_kwargs)
+            # Only cache if result is not None
+            if result is not None:
+                TOOL_RESULT_CACHE[tool_name] = result
+            print(
+                f"[DEBUG {timestamp}] Tool `{tool_name}` completed "
+                f"with result_type={type(result).__name__}"
+            )
+            return result
+        except Exception as e:  # noqa: BLE001
+            print(f"[ERROR {timestamp}] Tool `{tool_name}` failed: {e}")
+            raise
 
     return wrapper
 
 
 def normalize_and_merge_from_cache() -> Any:
     """Normalize and merge using the latest cached DataFrames from previous tools."""
+    # Ensure TOOL_RESULT_CACHE is initialized
+    global TOOL_RESULT_CACHE
+    if TOOL_RESULT_CACHE is None or not isinstance(TOOL_RESULT_CACHE, dict):
+        TOOL_RESULT_CACHE = {}
+    
     cpcb_df = TOOL_RESULT_CACHE.get("Fetch CPCB data")
     nasa_df = TOOL_RESULT_CACHE.get("Fetch NASA fire data")
     dss_df = TOOL_RESULT_CACHE.get("Fetch DSS pollution data")
@@ -62,19 +78,33 @@ def normalize_and_merge_from_cache() -> Any:
             f"Missing results from: {', '.join(missing)}"
         )
 
-    consolidated = storage_tools.normalize_and_merge(cpcb_df, nasa_df, dss_df)
-    TOOL_RESULT_CACHE["Normalize and merge data"] = consolidated
-    return consolidated
+    try:
+        consolidated = storage_tools.normalize_and_merge(cpcb_df, nasa_df, dss_df)
+        if consolidated is not None:
+            TOOL_RESULT_CACHE["Normalize and merge data"] = consolidated
+        return consolidated
+    except Exception as e:  # noqa: BLE001
+        print(f"[ERROR] normalize_and_merge failed: {e}")
+        raise
 
 
 def save_latest_to_s3_from_cache() -> Any:
     """Save the most recent consolidated DataFrame to S3."""
+    # Ensure TOOL_RESULT_CACHE is initialized
+    global TOOL_RESULT_CACHE
+    if TOOL_RESULT_CACHE is None or not isinstance(TOOL_RESULT_CACHE, dict):
+        TOOL_RESULT_CACHE = {}
+    
     consolidated_df = TOOL_RESULT_CACHE.get("Normalize and merge data")
     if consolidated_df is None:
         raise ValueError(
             "No consolidated DataFrame available. Run `Normalize and merge data` first."
         )
-    return storage_tools.save_to_s3(consolidated_df)
+    try:
+        return storage_tools.save_to_s3(consolidated_df)
+    except Exception as e:  # noqa: BLE001
+        print(f"[ERROR] save_to_s3 failed: {e}")
+        raise
 
 
 class _EmptyToolArgs(BaseModel):
@@ -161,6 +191,11 @@ get_meteo_forecast_tool = Tool(
 
 def synthesize_and_predict_from_cache() -> Any:
     """Synthesize sensor and meteorological data to generate AQI prediction."""
+    # Ensure TOOL_RESULT_CACHE is initialized
+    global TOOL_RESULT_CACHE
+    if TOOL_RESULT_CACHE is None or not isinstance(TOOL_RESULT_CACHE, dict):
+        TOOL_RESULT_CACHE = {}
+    
     sensor_data = TOOL_RESULT_CACHE.get("Read ingested data from S3")
     meteo_data = TOOL_RESULT_CACHE.get("Get meteorological forecast")
     
@@ -175,13 +210,23 @@ def synthesize_and_predict_from_cache() -> Any:
         print("[DEBUG] Meteorological data not available, proceeding with reduced confidence")
         meteo_data = {"error": "Meteorological data not available"}
     
-    result = prediction_tools.synthesize_and_predict(sensor_data, meteo_data)
-    TOOL_RESULT_CACHE["Synthesize and predict"] = result
-    return result
+    try:
+        result = prediction_tools.synthesize_and_predict(sensor_data, meteo_data)
+        if result is not None:
+            TOOL_RESULT_CACHE["Synthesize and predict"] = result
+        return result
+    except Exception as e:  # noqa: BLE001
+        print(f"[ERROR] synthesize_and_predict failed: {e}")
+        raise
 
 
 def generate_output_from_cache() -> Any:
     """Generate and save forecast output JSON from prediction data."""
+    # Ensure TOOL_RESULT_CACHE is initialized
+    global TOOL_RESULT_CACHE
+    if TOOL_RESULT_CACHE is None or not isinstance(TOOL_RESULT_CACHE, dict):
+        TOOL_RESULT_CACHE = {}
+    
     prediction_data = TOOL_RESULT_CACHE.get("Synthesize and predict")
     
     if prediction_data is None:
@@ -190,7 +235,11 @@ def generate_output_from_cache() -> Any:
             "Run 'Synthesize and predict' first."
         )
     
-    return output_tools.generate_output_tool(prediction_data)
+    try:
+        return output_tools.generate_output_tool(prediction_data)
+    except Exception as e:  # noqa: BLE001
+        print(f"[ERROR] generate_output failed: {e}")
+        raise
 
 
 synthesize_predict_tool = Tool(

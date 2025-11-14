@@ -69,25 +69,57 @@ def synthesize_and_predict(
         print("[DEBUG] Meteorological data unavailable, proceeding with reduced confidence")
         meteo_data = None
     
-    # Extract data from sensor_data
-    cpcb_data = sensor_data.get("cpcb_data")
-    nasa_data = sensor_data.get("nasa_data")
-    dss_data = sensor_data.get("dss_data")
-    data_quality = sensor_data.get("data_quality", {})
+    # Extract data from sensor_data with safe None handling
+    cpcb_data = sensor_data.get("cpcb_data") if sensor_data else None
+    nasa_data = sensor_data.get("nasa_data") if sensor_data else None
+    dss_data = sensor_data.get("dss_data") if sensor_data else None
+    data_quality = sensor_data.get("data_quality", {}) if sensor_data else {}
     
-    # Extract key metrics
-    current_aqi = cpcb_data.get("aqi") if cpcb_data else None
-    fire_count = nasa_data.get("fire_count") if nasa_data else None
-    stubble_burning_percent = dss_data.get("stubble_burning_percent") if dss_data else None
+    # Extract key metrics with safe None handling
+    current_aqi = None
+    if cpcb_data and isinstance(cpcb_data, dict):
+        aqi_val = cpcb_data.get("aqi")
+        if aqi_val is not None:
+            try:
+                current_aqi = float(aqi_val)
+            except (ValueError, TypeError):
+                current_aqi = None
     
-    # Calculate average wind speed over next 24 hours
+    fire_count = None
+    if nasa_data and isinstance(nasa_data, dict):
+        fire_val = nasa_data.get("fire_count")
+        if fire_val is not None:
+            try:
+                fire_count = int(fire_val)
+            except (ValueError, TypeError):
+                fire_count = None
+    
+    stubble_burning_percent = None
+    if dss_data and isinstance(dss_data, dict):
+        stubble_val = dss_data.get("stubble_burning_percent")
+        if stubble_val is not None:
+            try:
+                stubble_burning_percent = float(stubble_val)
+            except (ValueError, TypeError):
+                stubble_burning_percent = None
+    
+    # Calculate average wind speed over next 24 hours with safe None handling
     avg_wind_speed_24h = None
-    if meteo_data and "hourly_wind_speed" in meteo_data:
-        hourly_wind = meteo_data["hourly_wind_speed"]
-        # Take first 24 hours
-        wind_speeds_24h = [h["wind_speed_kmh"] for h in hourly_wind[:24]]
-        if wind_speeds_24h:
-            avg_wind_speed_24h = sum(wind_speeds_24h) / len(wind_speeds_24h)
+    if meteo_data and isinstance(meteo_data, dict) and "hourly_wind_speed" in meteo_data:
+        hourly_wind = meteo_data.get("hourly_wind_speed")
+        if hourly_wind and isinstance(hourly_wind, list):
+            # Take first 24 hours
+            wind_speeds_24h = []
+            for h in hourly_wind[:24]:
+                if isinstance(h, dict):
+                    wind_val = h.get("wind_speed_kmh")
+                    if wind_val is not None:
+                        try:
+                            wind_speeds_24h.append(float(wind_val))
+                        except (ValueError, TypeError):
+                            pass
+            if wind_speeds_24h:
+                avg_wind_speed_24h = sum(wind_speeds_24h) / len(wind_speeds_24h)
     
     print(f"[DEBUG] Extracted metrics: AQI={current_aqi}, fires={fire_count}, "
           f"wind={avg_wind_speed_24h}, stubble={stubble_burning_percent}%")

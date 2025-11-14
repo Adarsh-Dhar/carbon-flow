@@ -49,19 +49,23 @@ def normalize_and_merge(cpcb_df, nasa_df, dss_df):
     cpcb_normalized = cpcb_df.copy()
     if 'date' in cpcb_normalized.columns:
         cpcb_normalized['date'] = pd.to_datetime(cpcb_normalized['date'])
-    cpcb_normalized['source'] = 'CPCB'
+    # Add data_source column to identify the data source (CPCB/NASA/DSS)
+    cpcb_normalized['data_source'] = 'CPCB'
     
     # Normalize NASA DataFrame
     nasa_normalized = nasa_df.copy()
     if 'date' in nasa_normalized.columns:
         nasa_normalized['date'] = pd.to_datetime(nasa_normalized['date'])
-    nasa_normalized['source'] = 'NASA'
+    nasa_normalized['data_source'] = 'NASA'
     
     # Normalize DSS DataFrame
+    # IMPORTANT: DSS DataFrame has 'source' column with pollution source names (Stubble burning, Transport, etc.)
+    # We need to preserve this, so we add 'data_source' instead of overwriting 'source'
     dss_normalized = dss_df.copy()
     if 'date' in dss_normalized.columns:
         dss_normalized['date'] = pd.to_datetime(dss_normalized['date'])
-    dss_normalized['source'] = 'DSS'
+    dss_normalized['data_source'] = 'DSS'
+    # Preserve the original 'source' field which contains pollution source names
     
     # Merge the three normalized DataFrames
     consolidated_df = pd.concat([cpcb_normalized, nasa_normalized, dss_normalized], 

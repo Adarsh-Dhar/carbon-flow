@@ -7,6 +7,7 @@ import os
 from datetime import datetime, timezone
 from typing import Any
 
+import pandas as pd
 import boto3
 from botocore.exceptions import ClientError, NoCredentialsError
 
@@ -158,34 +159,138 @@ def _parse_sensor_data(data: list[dict[str, Any]]) -> dict[str, Any]:
         "dss_data": None
     }
     
-    for record in data:
-        source = record.get('source', '').upper()
+    if not data or not isinstance(data, list):
+        return result
+    
+    # Aggregate CPCB data - calculate average AQI from PM2.5 values
+    # Check both 'source' (legacy) and 'data_source' (new) fields
+    cpcb_records = [r for r in data if str(r.get('data_source', '') or r.get('source', '')).upper() == 'CPCB']
+    if cpcb_records:
+        # Calculate average AQI from pollutant_avg values (PM2.5 is primary indicator)
+        pm25_values = []
+        pm10_values = []
+        stations = []
+        timestamps = []
         
-        if source == 'CPCB':
-            result["cpcb_data"] = {
-                "aqi": record.get('aqi'),
-                "timestamp": record.get('date') or record.get('timestamp'),
-                "station": record.get('station', 'Unknown'),
-                "pm25": record.get('pm25'),
-                "pm10": record.get('pm10')
-            }
+        for record in cpcb_records:
+            pollutant = record.get('pollutant_id', '')
+            if pollutant == 'PM2.5':
+                pm25_val = record.get('pollutant_avg')
+                if pm25_val is not None:
+                    try:
+                        val = float(pm25_val)
+                        if not (isinstance(pm25_val, float) and pd.isna(pm25_val)):
+                            pm25_values.append(val)
+                    except (ValueError, TypeError):
+                        pass
+            elif pollutant == 'PM10':
+                pm10_val = record.get('pollutant_avg')
+                if pm10_val is not None:
+                    try:
+                        val = float(pm10_val)
+                        if not (isinstance(pm10_val, float) and pd.isna(pm10_val)):
+                            pm10_values.append(val)
+                    except (ValueError, TypeError):
+                        pass
+            
+            station = record.get('station', 'Unknown')
+            if station and station not in stations:
+                stations.append(station)
+            
+            timestamp = record.get('last_update') or record.get('date') or record.get('timestamp')
+            if timestamp and timestamp not in timestamps:
+                timestamps.append(timestamp)
         
-        elif source == 'NASA':
-            result["nasa_data"] = {
-                "fire_count": record.get('fire_count', 0),
-                "region": record.get('region', 'Unknown'),
-                "timestamp": record.get('date') or record.get('timestamp'),
-                "confidence_high": record.get('confidence_high')
-            }
+        # Calculate AQI from PM2.5 (simplified: PM2.5 value approximates AQI for high values)
+        avg_pm25 = sum(pm25_values) / len(pm25_values) if pm25_values else None
+        avg_pm10 = sum(pm10_values) / len(pm10_values) if pm10_values else None
         
-        elif source == 'DSS':
-            result["dss_data"] = {
-                "stubble_burning_percent": record.get('stubble_burning_percent', 0.0),
-                "vehicular_percent": record.get('vehicular_percent', 0.0),
-                "industrial_percent": record.get('industrial_percent', 0.0),
-                "dust_percent": record.get('dust_percent'),
-                "timestamp": record.get('date') or record.get('timestamp')
-            }
+        result["cpcb_data"] = {
+            "aqi": avg_pm25,  # Use PM2.5 as AQI proxy
+            "timestamp": timestamps[0] if timestamps else None,
+            "station": stations[0] if stations else 'Unknown',
+            "pm25": avg_pm25,
+            "pm10": avg_pm10
+        }
+    
+    # Aggregate NASA data - count fires
+    # Check both 'source' (legacy) and 'data_source' (new) fields
+    nasa_records = [r for r in data if str(r.get('data_source', '') or r.get('source', '')).upper() == 'NASA']
+    if nasa_records:
+        fire_count = len(nasa_records)
+        timestamps = [r.get('acq_date') or r.get('date') or r.get('timestamp') for r in nasa_records if r.get('acq_date') or r.get('date') or r.get('timestamp')]
+        
+        result["nasa_data"] = {
+            "fire_count": fire_count,
+            "region": "Punjab/Haryana",
+            "timestamp": timestamps[0] if timestamps else None,
+            "confidence_high": sum(1 for r in nasa_records if r.get('confidence', 0) > 70)
+        }
+    
+    # Aggregate DSS data - extract percentages
+    # DSS records have data_source='DSS' and the actual pollution source name is in the 'source' field
+    # Check both 'data_source' (new) and 'source' (legacy) fields
+    dss_records = [r for r in data if str(r.get('data_source', '') or r.get('source', '')).upper() == 'DSS']
+    if dss_records:
+        stubble_pct = None
+        vehicular_pct = None
+        industrial_pct = None
+        dust_pct = None
+        
+        for record in dss_records:
+            # DSS records now have 'source' field with pollution source names (Stubble burning, Transport, etc.)
+            # and 'percentage' field with the percentage value
+            source_name = str(record.get('source', '')).lower()
+            percentage = record.get('percentage')
+            
+            if percentage is not None:
+                try:
+                    pct_val = float(percentage)
+                    
+                    # Match based on source name
+                    if 'stubble' in source_name or 'burning' in source_name:
+                        stubble_pct = pct_val
+                    elif 'transport' in source_name or 'vehicle' in source_name or 'vehicular' in source_name:
+                        vehicular_pct = pct_val
+                    elif 'industr' in source_name:
+                        industrial_pct = pct_val
+                    elif 'dust' in source_name:
+                        dust_pct = pct_val
+                except (ValueError, TypeError):
+                    pass
+        
+        # Fallback: If we still don't have values, try to extract from raw_text field
+        if stubble_pct is None or vehicular_pct is None:
+            for record in dss_records:
+                raw_text = str(record.get('raw_text', '')).lower()
+                percentage = record.get('percentage')
+                if percentage is not None:
+                    try:
+                        pct_val = float(percentage)
+                        if 'stubble' in raw_text or 'burning' in raw_text:
+                            if stubble_pct is None:
+                                stubble_pct = pct_val
+                        elif 'transport' in raw_text or 'vehicle' in raw_text or 'vehicular' in raw_text:
+                            if vehicular_pct is None:
+                                vehicular_pct = pct_val
+                        elif 'industr' in raw_text:
+                            if industrial_pct is None:
+                                industrial_pct = pct_val
+                        elif 'dust' in raw_text:
+                            if dust_pct is None:
+                                dust_pct = pct_val
+                    except (ValueError, TypeError):
+                        pass
+        
+        timestamps = [r.get('date') or r.get('timestamp') or r.get('last_update') for r in dss_records if r.get('date') or r.get('timestamp') or r.get('last_update')]
+        
+        result["dss_data"] = {
+            "stubble_burning_percent": stubble_pct,
+            "vehicular_percent": vehicular_pct,
+            "industrial_percent": industrial_pct,
+            "dust_percent": dust_pct,
+            "timestamp": timestamps[0] if timestamps else None
+        }
     
     return result
 

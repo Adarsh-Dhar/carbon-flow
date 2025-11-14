@@ -19,24 +19,53 @@ from pathlib import Path
 from typing import Any
 
 # Add agent directories to path for imports
+# Agents use "from src.xxx" imports, so we need to add parent directories to path
 project_root = Path(__file__).parent
-forecast_src = project_root / "forecast-agent" / "src"
-enforcement_src = project_root / "grap-inforcement-agent" / "src"
-accountability_src = project_root / "interstate-accountability-agent" / "src"
-
-sys.path.insert(0, str(forecast_src))
-sys.path.insert(0, str(enforcement_src))
-sys.path.insert(0, str(accountability_src))
+forecast_agent_dir = project_root / "forecast-agent"
+enforcement_agent_dir = project_root / "grap-inforcement-agent"
+accountability_agent_dir = project_root / "interstate-accountability-agent"
 
 from crewai import Crew, Process
 
+# Configure LLM BEFORE importing any agents to avoid initialization errors
+# Load .env file first
+from dotenv import load_dotenv
+env_path = project_root / ".env"
+if env_path.exists():
+    load_dotenv(env_path)
+
+# Configure Gemini API key to work with CrewAI's OpenAI-compatible interface
+gemini_key = os.getenv("GEMINI_API_KEY")
+if gemini_key and not os.getenv("OPENAI_API_KEY"):
+    os.environ["OPENAI_API_KEY"] = gemini_key
+    os.environ["OPENAI_BASE_URL"] = "https://generativelanguage.googleapis.com/v1beta/openai/"
+    os.environ["OPENAI_MODEL_NAME"] = "gemini-2.0-flash"
+    os.environ.setdefault("OPENAI_API_BASE", os.environ["OPENAI_BASE_URL"])
+    os.environ.setdefault("MODEL_NAME", "gemini-2.0-flash")
+    os.environ.setdefault("MODEL", "gemini-2.0-flash")
+
 # Import forecast agent functions - need to import from the specific main module
 # We'll import the functions directly by executing the module setup
+# IMPORTANT: Only add forecast_agent_dir to path when loading forecast_main
 import importlib.util
 
+# Store original sys.path
+original_sys_path = sys.path.copy()
+
+# Helper function to clean agent directories from sys.path
+def remove_agent_dirs_from_path():
+    """Remove all agent directories from sys.path to avoid conflicts."""
+    agent_dirs = [str(forecast_agent_dir), str(enforcement_agent_dir), str(accountability_agent_dir)]
+    sys.path = [p for p in sys.path if p not in agent_dirs]
+
+# Temporarily modify sys.path to only include forecast agent directory
+remove_agent_dirs_from_path()
+sys.path.insert(0, str(forecast_agent_dir))
+
 # Load forecast agent main module
+forecast_main_path = forecast_agent_dir / "src" / "main.py"
 forecast_main_spec = importlib.util.spec_from_file_location(
-    "forecast_main", forecast_src / "main.py"
+    "forecast_main", forecast_main_path
 )
 forecast_main = importlib.util.module_from_spec(forecast_main_spec)
 sys.modules["forecast_main"] = forecast_main
@@ -46,17 +75,105 @@ forecast_main_spec.loader.exec_module(forecast_main)
 run_cycle = forecast_main.run_cycle
 run_forecast_cycle = forecast_main.run_forecast_cycle
 
-# Import enforcement agent
-from agents import enforcement_agent
-from tasks import task_execute_grap
+# Restore original sys.path
+sys.path = original_sys_path.copy()
 
-# Import accountability agent  
-from agents import accountability_agent
-from tasks import task_build_report
+# Import enforcement agent - use importlib to avoid module cache conflicts
+remove_agent_dirs_from_path()
+sys.path.insert(0, str(enforcement_agent_dir))
 
-# Import border station config and thresholds
-from config.border_stations import DELHI_BORDER_STATIONS, is_border_station
-from config.thresholds import SURGE_AQI_THRESHOLD
+# Clear any cached src modules to avoid conflicts
+modules_to_remove = [mod for mod in sys.modules.keys() if mod.startswith('src.')]
+for mod in modules_to_remove:
+    del sys.modules[mod]
+
+try:
+    enforcement_agents_spec = importlib.util.spec_from_file_location(
+        "enforcement_agents", enforcement_agent_dir / "src" / "agents.py"
+    )
+    enforcement_agents = importlib.util.module_from_spec(enforcement_agents_spec)
+    sys.modules["enforcement_agents"] = enforcement_agents
+    enforcement_agents_spec.loader.exec_module(enforcement_agents)
+    enforcement_agent = enforcement_agents.enforcement_agent
+    
+    enforcement_tasks_spec = importlib.util.spec_from_file_location(
+        "enforcement_tasks", enforcement_agent_dir / "src" / "tasks.py"
+    )
+    enforcement_tasks = importlib.util.module_from_spec(enforcement_tasks_spec)
+    sys.modules["enforcement_tasks"] = enforcement_tasks
+    enforcement_tasks_spec.loader.exec_module(enforcement_tasks)
+    task_execute_grap = enforcement_tasks.task_execute_grap
+finally:
+    sys.path = original_sys_path.copy()
+
+# Import accountability agent - use importlib to avoid module cache conflicts
+remove_agent_dirs_from_path()
+sys.path.insert(0, str(accountability_agent_dir))
+
+# Clear any cached src modules to avoid conflicts
+modules_to_remove = [mod for mod in list(sys.modules.keys()) if mod.startswith('src.')]
+for mod in modules_to_remove:
+    del sys.modules[mod]
+
+try:
+    # Load config modules first (they don't have dependencies)
+    accountability_config_bs_spec = importlib.util.spec_from_file_location(
+        "accountability_config_bs", accountability_agent_dir / "src" / "config" / "border_stations.py"
+    )
+    accountability_config_bs = importlib.util.module_from_spec(accountability_config_bs_spec)
+    sys.modules["accountability_config_bs"] = accountability_config_bs
+    accountability_config_bs_spec.loader.exec_module(accountability_config_bs)
+    DELHI_BORDER_STATIONS = accountability_config_bs.DELHI_BORDER_STATIONS
+    is_border_station = accountability_config_bs.is_border_station
+    
+    accountability_config_thresh_spec = importlib.util.spec_from_file_location(
+        "accountability_config_thresh", accountability_agent_dir / "src" / "config" / "thresholds.py"
+    )
+    accountability_config_thresh = importlib.util.module_from_spec(accountability_config_thresh_spec)
+    sys.modules["accountability_config_thresh"] = accountability_config_thresh
+    accountability_config_thresh_spec.loader.exec_module(accountability_config_thresh)
+    SURGE_AQI_THRESHOLD = accountability_config_thresh.SURGE_AQI_THRESHOLD
+    
+    # Load tools module first (agents depends on it)
+    accountability_tools_spec = importlib.util.spec_from_file_location(
+        "accountability_tools", accountability_agent_dir / "src" / "tools" / "accountability_tools.py"
+    )
+    accountability_tools = importlib.util.module_from_spec(accountability_tools_spec)
+    # Register it as src.tools.accountability_tools so imports work
+    sys.modules["src.tools.accountability_tools"] = accountability_tools
+    sys.modules["accountability_tools"] = accountability_tools
+    accountability_tools_spec.loader.exec_module(accountability_tools)
+    
+    # Also register src.tools so the import path works
+    if "src.tools" not in sys.modules:
+        tools_module = type(sys)("src.tools")
+        sys.modules["src.tools"] = tools_module
+    sys.modules["src.tools"].accountability_tools = accountability_tools
+    
+    # Register src.agents module namespace
+    if "src.agents" not in sys.modules:
+        agents_module = type(sys)("src.agents")
+        sys.modules["src.agents"] = agents_module
+    
+    # Now load agents (which depends on tools)
+    accountability_agents_spec = importlib.util.spec_from_file_location(
+        "accountability_agents", accountability_agent_dir / "src" / "agents.py"
+    )
+    accountability_agents = importlib.util.module_from_spec(accountability_agents_spec)
+    sys.modules["accountability_agents"] = accountability_agents
+    sys.modules["src.agents"] = accountability_agents  # Register as src.agents for imports
+    accountability_agents_spec.loader.exec_module(accountability_agents)
+    accountability_agent = accountability_agents.accountability_agent
+    
+    accountability_tasks_spec = importlib.util.spec_from_file_location(
+        "accountability_tasks", accountability_agent_dir / "src" / "tasks.py"
+    )
+    accountability_tasks = importlib.util.module_from_spec(accountability_tasks_spec)
+    sys.modules["accountability_tasks"] = accountability_tasks
+    accountability_tasks_spec.loader.exec_module(accountability_tasks)
+    task_build_report = accountability_tasks.task_build_report
+finally:
+    sys.path = original_sys_path.copy()
 
 # Configuration
 INGEST_INTERVAL_SECONDS = int(os.getenv("INGEST_INTERVAL_SECONDS", "1800"))  # 30 minutes
@@ -162,6 +279,18 @@ def run_forecast() -> dict[str, Any]:
     """Invoke ForecastAgent."""
     global last_forecast_timestamp
     log("Starting ForecastAgent cycle")
+    
+    # Initialize TOOL_RESULT_CACHE before forecast cycle
+    try:
+        # Ensure the cache is initialized in the forecast agent module
+        if hasattr(forecast_main, 'TOOL_RESULT_CACHE'):
+            if forecast_main.TOOL_RESULT_CACHE is None or not isinstance(forecast_main.TOOL_RESULT_CACHE, dict):
+                forecast_main.TOOL_RESULT_CACHE = {}
+        # Also clear it to start fresh
+        if hasattr(forecast_main, 'TOOL_RESULT_CACHE'):
+            forecast_main.TOOL_RESULT_CACHE.clear()
+    except Exception as e:  # noqa: BLE001
+        log(f"Warning: Could not initialize TOOL_RESULT_CACHE: {e}", "WARNING")
     
     result = run_with_retry(run_forecast_cycle, "ForecastAgent")
     
@@ -357,8 +486,9 @@ def read_latest_sensor_data() -> dict[str, Any] | None:
     # Fallback: Use accountability agent's tool to read correlated data
     try:
         # Import the tool function directly
+        accountability_tools_path = accountability_agent_dir / "src" / "tools" / "accountability_tools.py"
         accountability_tools_spec = importlib.util.spec_from_file_location(
-            "accountability_tools", accountability_src / "tools" / "accountability_tools.py"
+            "accountability_tools", accountability_tools_path
         )
         accountability_tools = importlib.util.module_from_spec(accountability_tools_spec)
         accountability_tools_spec.loader.exec_module(accountability_tools)
@@ -519,20 +649,20 @@ if __name__ == "__main__":
         log(f"ERROR: Missing required environment variables: {', '.join(missing_vars)}", "ERROR")
         sys.exit(1)
     
-    # Configure LLM (if needed by agents)
-    # The agents will configure themselves, but we can try to set up environment
+    # LLM is already configured at module level before agent imports
+    # Additional configuration from forecast agent's utils (optional, for consistency)
     try:
-        # Try to configure from forecast agent's utils
+        forecast_utils_path = forecast_agent_dir / "src" / "utils" / "env_config.py"
         forecast_utils_spec = importlib.util.spec_from_file_location(
-            "forecast_utils", forecast_src / "utils" / "env_config.py"
+            "forecast_utils", forecast_utils_path
         )
         forecast_utils = importlib.util.module_from_spec(forecast_utils_spec)
         forecast_utils_spec.loader.exec_module(forecast_utils)
         if hasattr(forecast_utils, "configure_llm_from_env"):
             forecast_utils.configure_llm_from_env()
-            log("LLM configuration loaded")
+            log("Additional LLM configuration applied")
     except Exception as e:  # noqa: BLE001
-        log(f"LLM configuration not available, agents will use their own configuration: {e}", "WARNING")
+        log(f"Additional LLM configuration not available: {e}", "WARNING")
     
     # Start main loop
     main_loop()
