@@ -199,6 +199,85 @@ def get_log_file() -> Path:
     return log_dir / f"orchestrator_{today}.log"
 
 
+def get_orchestrator_state() -> dict[str, Any]:
+    """
+    Get current orchestrator state.
+    
+    Returns:
+        Dict with orchestrator state information including last run times
+    """
+    return {
+        "last_ingestion_timestamp": last_ingestion_timestamp,
+        "last_forecast_timestamp": last_forecast_timestamp,
+        "last_enforcement_trigger": last_enforcement_trigger,
+        "last_accountability_trigger": last_accountability_trigger,
+        "ingest_interval_seconds": INGEST_INTERVAL_SECONDS,
+        "forecast_output_dir": FORECAST_OUTPUT_DIR,
+        "log_dir": str(log_dir),
+    }
+
+
+def get_recent_logs(limit: int = 50) -> list[dict[str, Any]]:
+    """
+    Read recent log entries from orchestrator log file.
+    
+    Args:
+        limit: Maximum number of log entries to return
+        
+    Returns:
+        List of log entries with timestamp, level, and message
+    """
+    log_file = get_log_file()
+    
+    if not log_file.exists():
+        return []
+    
+    logs = []
+    try:
+        with open(log_file, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+            # Read last N lines
+            for line in lines[-limit:]:
+                line = line.strip()
+                if not line:
+                    continue
+                
+                # Parse log format: [timestamp] [LEVEL] message
+                try:
+                    if line.startswith("[") and "]" in line:
+                        # Extract timestamp
+                        timestamp_end = line.find("]", 1)
+                        if timestamp_end > 0:
+                            timestamp_str = line[1:timestamp_end]
+                            
+                            # Extract level
+                            level_start = line.find("[", timestamp_end + 1)
+                            level_end = line.find("]", level_start + 1) if level_start > 0 else -1
+                            level = "INFO"
+                            message = line[level_end + 1:].strip() if level_end > 0 else line[timestamp_end + 1:].strip()
+                            
+                            if level_start > 0 and level_end > 0:
+                                level = line[level_start + 1:level_end]
+                                message = line[level_end + 1:].strip()
+                            
+                            logs.append({
+                                "timestamp": timestamp_str,
+                                "level": level,
+                                "message": message
+                            })
+                except Exception:
+                    # If parsing fails, include raw line
+                    logs.append({
+                        "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+                        "level": "INFO",
+                        "message": line
+                    })
+    except IOError:
+        pass
+    
+    return logs[-limit:]
+
+
 def log(message: str, level: str = "INFO") -> None:
     """Log message to both console and file."""
     timestamp = datetime.now(tz=timezone.utc).isoformat()
