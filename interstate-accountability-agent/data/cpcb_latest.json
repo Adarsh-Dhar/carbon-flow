@@ -1,0 +1,51 @@
+{
+  "stations": [
+    {
+      "station": "Alipur",
+      "aqi": 450,
+      "timestamp": "2025-11-14T08:00:00Z",
+      "pm25": 350.5,
+      "pm10": 420.2,
+      "latitude": 28.8,
+      "longitude": 77.1,
+      "pollutants": {
+        "NO2": 85.3,
+        "SO2": 12.5,
+        "CO": 2.1,
+        "O3": 45.2
+      }
+    },
+    {
+      "station": "Anand Vihar",
+      "aqi": 380,
+      "timestamp": "2025-11-14T08:00:00Z",
+      "pm25": 290.3,
+      "pm10": 360.8,
+      "latitude": 28.65,
+      "longitude": 77.32,
+      "pollutants": {
+        "NO2": 78.1,
+        "SO2": 10.8,
+        "CO": 1.9,
+        "O3": 42.7
+      }
+    },
+    {
+      "station": "Dwarka",
+      "aqi": 320,
+      "timestamp": "2025-11-14T08:00:00Z",
+      "pm25": 245.6,
+      "pm10": 310.4,
+      "latitude": 28.59,
+      "longitude": 77.05,
+      "pollutants": {
+        "NO2": 65.4,
+        "SO2": 9.2,
+        "CO": 1.6,
+        "O3": 38.9
+      }
+    }
+  ],
+  "source": "CPCB Real-time Data",
+  "data_timestamp": "2025-11-14T08:00:00Z"
+}

@@ -1,0 +1,78 @@
+{
+  "fire_events": [
+    {
+      "latitude": 29.2,
+      "longitude": 76.5,
+      "brightness": 320.5,
+      "confidence": 85,
+      "acq_date": "2025-11-13",
+      "acq_time": "0830",
+      "state": "Haryana",
+      "district": "Jind"
+    },
+    {
+      "latitude": 29.15,
+      "longitude": 76.48,
+      "brightness": 315.2,
+      "confidence": 82,
+      "acq_date": "2025-11-13",
+      "acq_time": "0845",
+      "state": "Haryana",
+      "district": "Jind"
+    },
+    {
+      "latitude": 29.3,
+      "longitude": 76.6,
+      "brightness": 328.7,
+      "confidence": 88,
+      "acq_date": "2025-11-13",
+      "acq_time": "0900",
+      "state": "Haryana",
+      "district": "Karnal"
+    },
+    {
+      "latitude": 29.25,
+      "longitude": 76.55,
+      "brightness": 312.8,
+      "confidence": 80,
+      "acq_date": "2025-11-13",
+      "acq_time": "0915",
+      "state": "Haryana",
+      "district": "Jind"
+    },
+    {
+      "latitude": 29.35,
+      "longitude": 76.65,
+      "brightness": 325.4,
+      "confidence": 86,
+      "acq_date": "2025-11-13",
+      "acq_time": "0930",
+      "state": "Haryana",
+      "district": "Karnal"
+    },
+    {
+      "latitude": 30.1,
+      "longitude": 75.8,
+      "brightness": 318.9,
+      "confidence": 83,
+      "acq_date": "2025-11-13",
+      "acq_time": "1000",
+      "state": "Punjab",
+      "district": "Patiala"
+    },
+    {
+      "latitude": 30.15,
+      "longitude": 75.85,
+      "brightness": 322.3,
+      "confidence": 87,
+      "acq_date": "2025-11-13",
+      "acq_time": "1015",
+      "state": "Punjab",
+      "district": "Patiala"
+    }
+  ],
+  "source": "NASA FIRMS",
+  "satellite": "VIIRS",
+  "data_timestamp": "2025-11-14T07:30:00Z",
+  "total_fires": 7
+}
