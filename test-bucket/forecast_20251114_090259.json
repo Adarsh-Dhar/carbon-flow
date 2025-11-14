@@ -1,0 +1,16 @@
+{
+  "prediction": {
+    "aqi_category": "Stable",
+    "threshold": 0,
+    "estimated_hours_to_threshold": 24
+  },
+  "confidence_level": 12.0,
+  "reasoning": "IF meteorological data shows favorable wind speed (15.0 km/h average over next 24h), AND current AQI is 250, THEN I predict aqi expected to remain stable with current conditions.",
+  "timestamp": "2025-11-14T09:02:59.522827Z",
+  "data_sources": {
+    "sensor_data_age_hours": 2.5,
+    "meteorological_forecast_retrieved": true,
+    "cpcb_aqi": 250.0,
+    "avg_wind_speed_24h_kmh": 15.0
+  }
+}

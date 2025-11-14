@@ -1,0 +1,18 @@
+{
+  "prediction": {
+    "aqi_category": "Severe",
+    "threshold": 401,
+    "estimated_hours_to_threshold": 1
+  },
+  "confidence_level": 50.0,
+  "reasoning": "IF SensorIngestAgent reports 450 new fires (exceeding high threshold of 400), AND meteorological data shows low wind speed (9.2 km/h average over next 24h, below 10 km/h threshold), AND DSS forecasts stubble burning's contribution will rise to 22% (exceeding 20% threshold), AND current AQI is 380, THEN I predict the AQI will cross the 'Severe' threshold (401) in approximately 1 hours.",
+  "timestamp": "2025-11-14T09:00:56.092277Z",
+  "data_sources": {
+    "sensor_data_age_hours": 2.5,
+    "meteorological_forecast_retrieved": true,
+    "cpcb_aqi": 380.0,
+    "nasa_fire_count": 450,
+    "avg_wind_speed_24h_kmh": 9.2,
+    "stubble_burning_percent": 22.0
+  }
+}

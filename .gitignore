@@ -155,4 +155,8 @@ cython_debug/
 .npm/
 node_modules/
 
+# Forecast output files (keep directory structure)
+forecast-agent/output/*.json
+!forecast-agent/output/.gitkeep
+
 
