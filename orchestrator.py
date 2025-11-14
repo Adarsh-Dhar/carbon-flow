@@ -445,7 +445,7 @@ def read_latest_sensor_data() -> dict[str, Any] | None:
     Read latest sensor data from S3 or use accountability agent's tool.
     
     Returns:
-        Sensor data dict or None if unavailable
+        Sensor data dict with cpcb_data, nasa_data, dss_data sections, or None if unavailable
     """
     # Try to read from S3 first
     bucket_name = os.getenv("S3_BUCKET_NAME")
@@ -479,7 +479,16 @@ def read_latest_sensor_data() -> dict[str, Any] | None:
                 data = json.loads(content)
                 
                 log(f"Read sensor data from S3: {object_key}")
-                return data
+                
+                # Parse list data into structured format
+                if isinstance(data, list):
+                    return _parse_sensor_data_list(data)
+                elif isinstance(data, dict):
+                    # Already in the correct format
+                    return data
+                else:
+                    log(f"Unexpected data format: {type(data)}", "WARNING")
+                    return None
         except Exception as e:  # noqa: BLE001
             log(f"Failed to read from S3: {e}, trying accountability tool", "WARNING")
     
@@ -496,10 +505,121 @@ def read_latest_sensor_data() -> dict[str, Any] | None:
         if hasattr(accountability_tools, "read_correlated_data"):
             log("Reading sensor data using accountability agent tool")
             data = accountability_tools.read_correlated_data()
+            # Ensure it's in the correct format
+            if isinstance(data, list):
+                return _parse_sensor_data_list(data)
             return data
     except Exception as e:  # noqa: BLE001
         log(f"Failed to read sensor data: {e}", "ERROR")
         return None
+
+
+def _parse_sensor_data_list(data: list[dict[str, Any]]) -> dict[str, Any]:
+    """
+    Parse sensor data from JSON array into structured format for border spike detection.
+    
+    Args:
+        data: List of data records from S3
+        
+    Returns:
+        Dict with cpcb_data (list of station records), nasa_data, and dss_data sections
+    """
+    result: dict[str, Any] = {
+        "cpcb_data": [],
+        "nasa_data": None,
+        "dss_data": None
+    }
+    
+    if not data or not isinstance(data, list):
+        return result
+    
+    # Extract CPCB records and group by station
+    # Check both 'data_source' (new) and 'source' (legacy) fields
+    cpcb_records = [r for r in data if str(r.get('data_source', '') or r.get('source', '')).upper() == 'CPCB']
+    
+    if cpcb_records:
+        # Group by station
+        stations_dict: dict[str, dict[str, Any]] = {}
+        
+        for record in cpcb_records:
+            station = record.get('station', 'Unknown')
+            pollutant = record.get('pollutant_id', '')
+            pollutant_avg = record.get('pollutant_avg')
+            
+            if station not in stations_dict:
+                stations_dict[station] = {
+                    'station': station,
+                    'aqi': 0,
+                    'pm25': None,
+                    'pm10': None,
+                    'timestamp': record.get('last_update') or record.get('date') or record.get('timestamp'),
+                    'latitude': record.get('latitude'),
+                    'longitude': record.get('longitude')
+                }
+            
+            # Update pollutant values
+            if pollutant == 'PM2.5' and pollutant_avg is not None:
+                try:
+                    pm25_val = float(pollutant_avg)
+                    stations_dict[station]['pm25'] = pm25_val
+                    # Use PM2.5 as AQI proxy
+                    stations_dict[station]['aqi'] = pm25_val
+                except (ValueError, TypeError):
+                    pass
+            elif pollutant == 'PM10' and pollutant_avg is not None:
+                try:
+                    pm10_val = float(pollutant_avg)
+                    stations_dict[station]['pm10'] = pm10_val
+                except (ValueError, TypeError):
+                    pass
+        
+        result["cpcb_data"] = list(stations_dict.values())
+    
+    # Extract NASA data
+    nasa_records = [r for r in data if str(r.get('data_source', '') or r.get('source', '')).upper() == 'NASA']
+    if nasa_records:
+        result["nasa_data"] = {
+            "fire_count": len(nasa_records),
+            "region": "Punjab/Haryana",
+            "timestamp": nasa_records[0].get('acq_date') if nasa_records else None,
+            "confidence_high": sum(1 for r in nasa_records if r.get('confidence', 0) > 70)
+        }
+    
+    # Extract DSS data
+    dss_records = [r for r in data if str(r.get('data_source', '') or r.get('source', '')).upper() == 'DSS']
+    if dss_records:
+        stubble_pct = None
+        vehicular_pct = None
+        industrial_pct = None
+        dust_pct = None
+        
+        for record in dss_records:
+            source_name = str(record.get('source', '')).lower()
+            percentage = record.get('percentage')
+            
+            if percentage is not None:
+                try:
+                    pct_val = float(percentage)
+                    if 'stubble' in source_name or 'burning' in source_name:
+                        stubble_pct = pct_val
+                    elif 'transport' in source_name or 'vehicle' in source_name or 'vehicular' in source_name:
+                        vehicular_pct = pct_val
+                    elif 'industr' in source_name:
+                        industrial_pct = pct_val
+                    elif 'dust' in source_name:
+                        dust_pct = pct_val
+                except (ValueError, TypeError):
+                    pass
+        
+        result["dss_data"] = {
+            "stubble_burning_percent": stubble_pct,
+            "vehicular_percent": vehicular_pct,
+            "industrial_percent": industrial_pct,
+            "dust_percent": dust_pct,
+            "timestamp": dss_records[0].get('date') if dss_records else None
+        }
+    
+    return result
 
 
 def detect_border_spike() -> bool:
