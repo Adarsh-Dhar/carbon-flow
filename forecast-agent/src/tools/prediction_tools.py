@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from datetime import datetime
 from typing import Any
 
@@ -119,13 +120,15 @@ def synthesize_and_predict(
             except (ValueError, TypeError):
                 stubble_burning_percent = None
     
-    # Calculate average wind speed over next 24 hours with safe None handling
+    # Calculate average wind speed and direction over next 24 hours with safe None handling
     avg_wind_speed_24h = None
+    avg_wind_direction_24h = None
     if meteo_data and isinstance(meteo_data, dict) and "hourly_wind_speed" in meteo_data:
         hourly_wind = meteo_data.get("hourly_wind_speed")
         if hourly_wind and isinstance(hourly_wind, list):
             # Take first 24 hours
             wind_speeds_24h = []
+            wind_directions_24h = []
             for h in hourly_wind[:24]:
                 if isinstance(h, dict):
                     wind_val = h.get("wind_speed_kmh")
@@ -134,11 +137,31 @@ def synthesize_and_predict(
                             wind_speeds_24h.append(float(wind_val))
                         except (ValueError, TypeError):
                             pass
+                    
+                    wind_dir_val = h.get("wind_direction_deg")
+                    if wind_dir_val is not None:
+                        try:
+                            wind_directions_24h.append(float(wind_dir_val))
+                        except (ValueError, TypeError):
+                            pass
+            
             if wind_speeds_24h:
                 avg_wind_speed_24h = sum(wind_speeds_24h) / len(wind_speeds_24h)
+            
+            if wind_directions_24h:
+                # Calculate average wind direction using circular mean
+                # Convert to radians, calculate mean, convert back to degrees
+                radians = [math.radians(d) for d in wind_directions_24h]
+                sin_sum = sum(math.sin(r) for r in radians)
+                cos_sum = sum(math.cos(r) for r in radians)
+                avg_rad = math.atan2(sin_sum / len(radians), cos_sum / len(radians))
+                avg_wind_direction_24h = math.degrees(avg_rad)
+                # Normalize to 0-360
+                if avg_wind_direction_24h < 0:
+                    avg_wind_direction_24h += 360
     
     print(f"[DEBUG] Extracted metrics: AQI={current_aqi}, fires={fire_count}, "
-          f"wind={avg_wind_speed_24h}, stubble={stubble_burning_percent}%")
+          f"wind={avg_wind_speed_24h} km/h @ {avg_wind_direction_24h}°, stubble={stubble_burning_percent}%")
     
     # Apply prediction logic
     prediction_result = _apply_prediction_logic(
@@ -177,6 +200,7 @@ def synthesize_and_predict(
         "current_aqi": current_aqi,
         "fire_count": fire_count,
         "avg_wind_speed_24h": avg_wind_speed_24h,
+        "avg_wind_direction_24h": avg_wind_direction_24h,
         "stubble_burning_percent": stubble_burning_percent
     }
     

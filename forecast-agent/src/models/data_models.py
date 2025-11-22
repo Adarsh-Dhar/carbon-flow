@@ -165,17 +165,19 @@ class SensorData:
 
 @dataclass
 class HourlyWindSpeed:
-    """Hourly wind speed forecast data point.
+    """Hourly wind speed and direction forecast data point.
     
     Attributes:
         timestamp: Time of the forecast
         wind_speed_kmh: Wind speed in kilometers per hour
+        wind_direction_deg: Wind direction in degrees (0-360, where 0 is North)
     """
     timestamp: datetime
     wind_speed_kmh: float
+    wind_direction_deg: float | None = None
     
     def validate(self) -> bool:
-        """Validate wind speed data.
+        """Validate wind speed and direction data.
         
         Returns:
             True if data is valid
@@ -185,6 +187,8 @@ class HourlyWindSpeed:
         """
         if self.wind_speed_kmh < 0:
             raise ValueError(f"Wind speed must be non-negative, got {self.wind_speed_kmh}")
+        if self.wind_direction_deg is not None and not (0 <= self.wind_direction_deg < 360):
+            raise ValueError(f"Wind direction must be 0-360, got {self.wind_direction_deg}")
         return True
 
 

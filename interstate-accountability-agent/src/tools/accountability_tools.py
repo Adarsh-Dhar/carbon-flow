@@ -17,6 +17,11 @@ from botocore.exceptions import ClientError
 from crewai.tools import tool
 from pydantic import BaseModel, Field
 
+# Import new tools
+from src.tools.surge_detection_tools import detect_surge
+from src.tools.correlation_tools import correlate_fires, calculate_confidence_score
+from src.tools.report_generation_tools import generate_report
+
 # Tool result cache for fallback execution
 TOOL_RESULT_CACHE: dict[str, Any] = {}
 
@@ -328,3 +333,219 @@ def send_caqm_report(
     debug_log("send_caqm_report", "Report successfully sent to CAQM")
     
     return result
+
+
+class DetectSurgeInput(BaseModel):
+    """Input schema for detect_surge_tool."""
+    
+    cpcb_data: list[dict[str, Any]] = Field(
+        description="List of CPCB station data records"
+    )
+    security_context: dict | None = Field(
+        default=None,
+        description="Security context for CrewAI compatibility",
+    )
+
+
+@tool("Detect pollution surge at border stations")
+def detect_surge_tool(
+    cpcb_data: list[dict[str, Any]],
+    security_context: dict | None = None,
+) -> dict[str, Any]:
+    """
+    Detect pollution surges at Delhi border stations.
+    
+    Filters CPCB data for border stations and identifies stations with AQI
+    exceeding the threshold (300).
+    
+    Args:
+        cpcb_data: List of CPCB station data records
+        security_context: Security context for CrewAI compatibility
+        
+    Returns:
+        Dict with surge_stations list (serialized BorderStation objects)
+    """
+    debug_log("detect_surge_tool", f"Detecting surges in {len(cpcb_data)} CPCB records")
+    
+    try:
+        surge_stations = detect_surge(cpcb_data)
+        
+        # Serialize to dict
+        result = {
+            "surge_stations": [station.to_dict() for station in surge_stations],
+            "surge_count": len(surge_stations),
+        }
+        
+        # Cache result
+        TOOL_RESULT_CACHE["detect_surge_tool"] = result
+        
+        debug_log("detect_surge_tool", f"Detected {len(surge_stations)} surge(s)")
+        return result
+        
+    except Exception as e:  # noqa: BLE001
+        error_result = {
+            "error": "Surge detection failed",
+            "details": str(e),
+            "surge_stations": [],
+            "surge_count": 0,
+        }
+        debug_log("detect_surge_tool", f"Tool failed: {str(e)}")
+        return error_result
+
+
+class CorrelateFiresInput(BaseModel):
+    """Input schema for correlate_fires_tool."""
+    
+    surge_stations: list[dict[str, Any]] = Field(
+        description="List of surge station data (BorderStation objects as dicts)"
+    )
+    nasa_data: list[dict[str, Any]] = Field(
+        description="List of NASA FIRMS fire event dictionaries"
+    )
+    security_context: dict | None = Field(
+        default=None,
+        description="Security context for CrewAI compatibility",
+    )
+
+
+@tool("Correlate fire events with pollution surges")
+def correlate_fires_tool(
+    surge_stations: list[dict[str, Any]],
+    nasa_data: list[dict[str, Any]],
+    security_context: dict | None = None,
+) -> dict[str, Any]:
+    """
+    Correlate NASA FIRMS fire events with pollution surges at border stations.
+    
+    Uses haversine distance calculation to find fires within 200km of surge stations
+    and within 48 hours of the surge timestamp.
+    
+    Args:
+        surge_stations: List of surge station data (BorderStation objects as dicts)
+        nasa_data: List of NASA FIRMS fire event dictionaries
+        security_context: Security context for CrewAI compatibility
+        
+    Returns:
+        Dict with correlation_results list (serialized CorrelationResult objects)
+    """
+    debug_log("correlate_fires_tool", f"Correlating {len(nasa_data)} fires with {len(surge_stations)} surge stations")
+    
+    try:
+        # Convert dicts to BorderStation objects
+        from src.models.data_models import BorderStation
+        
+        border_stations = [BorderStation.from_dict(st) for st in surge_stations]
+        
+        # Correlate fires
+        correlation_results = correlate_fires(border_stations, nasa_data)
+        
+        # Serialize to dict
+        result = {
+            "correlation_results": [cr.to_dict() for cr in correlation_results],
+            "total_fires": sum(cr.fire_count for cr in correlation_results),
+        }
+        
+        # Cache result
+        TOOL_RESULT_CACHE["correlate_fires_tool"] = result
+        
+        debug_log("correlate_fires_tool", f"Correlated {result['total_fires']} fires")
+        return result
+        
+    except Exception as e:  # noqa: BLE001
+        error_result = {
+            "error": "Fire correlation failed",
+            "details": str(e),
+            "correlation_results": [],
+            "total_fires": 0,
+        }
+        debug_log("correlate_fires_tool", f"Tool failed: {str(e)}")
+        return error_result
+
+
+class GenerateReportInput(BaseModel):
+    """Input schema for generate_report_tool."""
+    
+    surge_station: dict[str, Any] = Field(
+        description="Surge station data dictionary"
+    )
+    correlation_results: list[dict[str, Any]] = Field(
+        description="List of correlation results (CorrelationResult objects as dicts)"
+    )
+    nasa_data_available: bool = Field(
+        default=True,
+        description="Whether NASA data is available"
+    )
+    dss_data_available: bool = Field(
+        default=True,
+        description="Whether DSS data is available"
+    )
+    dss_data: dict[str, Any] | None = Field(
+        default=None,
+        description="DSS data dictionary (optional)"
+    )
+    security_context: dict | None = Field(
+        default=None,
+        description="Security context for CrewAI compatibility",
+    )
+
+
+@tool("Generate CAQM accountability report")
+def generate_report_tool(
+    surge_station: dict[str, Any],
+    correlation_results: list[dict[str, Any]],
+    nasa_data_available: bool = True,
+    dss_data_available: bool = True,
+    dss_data: dict[str, Any] | None = None,
+    security_context: dict | None = None,
+) -> dict[str, Any]:
+    """
+    Generate complete CAQM accountability report.
+    
+    Creates a structured report with executive summary, surge details,
+    fire correlation analysis, reasoning statement, confidence score,
+    legal citations, and recommendations.
+    
+    Args:
+        surge_station: Surge station data dictionary
+        correlation_results: List of correlation results (CorrelationResult objects as dicts)
+        nasa_data_available: Whether NASA data is available
+        dss_data_available: Whether DSS data is available
+        dss_data: DSS data dictionary (optional)
+        security_context: Security context for CrewAI compatibility
+        
+    Returns:
+        Dict with complete CAQM report (CAQMReport object as dict)
+    """
+    debug_log("generate_report_tool", "Generating CAQM accountability report")
+    
+    try:
+        # Convert dicts to CorrelationResult objects
+        from src.models.data_models import CorrelationResult
+        
+        correlation_objs = [CorrelationResult.from_dict(cr) for cr in correlation_results]
+        
+        # Generate report
+        report = generate_report(
+            surge_station,
+            correlation_objs,
+            nasa_data_available,
+            dss_data_available,
+            dss_data,
+        )
+        
+        # Serialize to dict
+        result = report.to_dict()
+        
+        # Cache result
+        TOOL_RESULT_CACHE["generate_report_tool"] = result
+        
+        debug_log("generate_report_tool", f"Report generated with ID: {result.get('report_id')}")
+        return result
+        
+    except Exception as e:  # noqa: BLE001
+        error_result = {
+            "error": "Report generation failed",
+            "details": str(e),
+        }
+        debug_log("generate_report_tool", f"Tool failed: {str(e)}")
+        return error_result

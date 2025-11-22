@@ -33,7 +33,8 @@ def get_meteorological_forecast_tool(
             "hourly_wind_speed": [
                 {
                     "timestamp": str,  # ISO 8601 format
-                    "wind_speed_kmh": float
+                    "wind_speed_kmh": float,
+                    "wind_direction_deg": float  # Wind direction in degrees (0-360)
                 },
                 ...
             ],
@@ -59,7 +60,7 @@ def get_meteorological_forecast_tool(
     params = {
         "latitude": latitude,
         "longitude": longitude,
-        "hourly": "wind_speed_10m",
+        "hourly": "wind_speed_10m,wind_direction_10m",
         "forecast_days": forecast_days,
         "wind_speed_unit": "kmh"
     }
@@ -163,21 +164,26 @@ def _parse_meteo_response(
         max_hours: Maximum number of hours to include
         
     Returns:
-        Dict with hourly_wind_speed list and location info
+        Dict with hourly_wind_speed list (including wind direction) and location info
     """
     hourly_data = data.get('hourly', {})
     timestamps = hourly_data.get('time', [])
     wind_speeds = hourly_data.get('wind_speed_10m', [])
+    wind_directions = hourly_data.get('wind_direction_10m', [])
     
-    # Combine timestamps and wind speeds, limiting to max_hours
+    # Combine timestamps, wind speeds, and wind directions, limiting to max_hours
     hourly_wind_speed = []
     for i, (timestamp, wind_speed) in enumerate(zip(timestamps, wind_speeds)):
         if i >= max_hours:
             break
         
+        # Get wind direction if available (same index as wind speed)
+        wind_direction = wind_directions[i] if i < len(wind_directions) else None
+        
         hourly_wind_speed.append({
             "timestamp": timestamp,
-            "wind_speed_kmh": wind_speed
+            "wind_speed_kmh": wind_speed,
+            "wind_direction_deg": wind_direction
         })
     
     return {

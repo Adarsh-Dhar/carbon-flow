@@ -2,11 +2,19 @@
 Enforcement Team Dispatch Tool
 
 This module contains the CrewAI tool for dispatching enforcement teams
-to pollution hotspots during GRAP Stage III activation.
+to pollution hotspots during GRAP Stage III activation. Uses real API if credentials are available.
 """
 
 import json
 from crewai.tools import tool
+
+# Import API adapters
+try:
+    from src.tools.api_adapters.enforcement_api import EnforcementAPIAdapter
+    ADAPTERS_AVAILABLE = True
+except ImportError:
+    ADAPTERS_AVAILABLE = False
+    EnforcementAPIAdapter = None
 
 
 @tool
@@ -14,8 +22,9 @@ def dispatch_enforcement_teams(hotspots: list[str]) -> str:
     """
     Dispatch enforcement teams to pollution hotspots across Delhi NCR.
     
-    This tool simulates dispatching 2,000+ enforcement teams to monitor
-    and enforce GRAP Stage III protocols at identified pollution hotspots.
+    This tool dispatches 2,000+ enforcement teams to monitor and enforce GRAP
+    Stage III protocols at identified pollution hotspots. Uses real API if
+    credentials are available, otherwise falls back to mock implementation.
     
     Args:
         hotspots: List of pollution hotspot locations to prioritize
@@ -26,18 +35,20 @@ def dispatch_enforcement_teams(hotspots: list[str]) -> str:
     Example:
         >>> result = dispatch_enforcement_teams(["Anand Vihar", "Punjabi Bagh"])
         >>> print(result)
-        '{"status": "SUCCESS", "action": "teams_dispatched", "hotspots_targeted": ["Anand Vihar", "Punjabi Bagh"]}'
+        '{"status": "SUCCESS", "action": "teams_dispatched", "api_mode": "mock", ...}'
     """
-    # Log the enforcement action
-    print(
-        f"ACTION: Dispatching 2,000+ enforcement teams, prioritizing hotspots: {', '.join(hotspots)}"
-    )
-
-    # Return success status as JSON string with hotspots
-    return json.dumps(
-        {
+    if ADAPTERS_AVAILABLE and EnforcementAPIAdapter:
+        adapter = EnforcementAPIAdapter()
+        result = adapter.dispatch_enforcement_teams(hotspots)
+        return json.dumps(result)
+    else:
+        # Fallback to simple mock if adapters not available
+        print(
+            f"ACTION: Dispatching 2,000+ enforcement teams, prioritizing hotspots: {', '.join(hotspots)}"
+        )
+        return json.dumps({
             "status": "SUCCESS",
             "action": "teams_dispatched",
+            "api_mode": "fallback_mock",
             "hotspots_targeted": hotspots,
-        }
-    )
+        })

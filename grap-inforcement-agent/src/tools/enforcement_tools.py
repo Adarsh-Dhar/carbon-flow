@@ -2,7 +2,7 @@
 GRAP Stage III Enforcement Tools
 
 This module contains CrewAI tools for executing Delhi's GRAP Stage III enforcement actions.
-Each tool simulates a specific enforcement action and returns structured results for audit logging.
+Each tool uses API adapters that support both real API calls and mock fallback.
 """
 
 from datetime import datetime
@@ -10,14 +10,23 @@ from typing import Any
 import json
 from crewai.tools import tool
 
+# Import API adapters
+try:
+    from src.tools.api_adapters.construction_api import ConstructionAPIAdapter
+    ADAPTERS_AVAILABLE = True
+except ImportError:
+    ADAPTERS_AVAILABLE = False
+    ConstructionAPIAdapter = None
+
 
 @tool
 def issue_construction_ban(reasoning_text: str) -> str:
     """
     Issue GRAP-III stop-work orders to all non-essential construction sites.
     
-    This tool simulates sending construction ban notifications to registered
-    construction sites in the Delhi NCR region during severe air quality events.
+    This tool sends construction ban notifications to registered construction sites
+    in the Delhi NCR region during severe air quality events. Uses real API if
+    credentials are available, otherwise falls back to mock implementation.
     
     Args:
         reasoning_text: Explanation for why the construction ban is being issued
@@ -28,10 +37,17 @@ def issue_construction_ban(reasoning_text: str) -> str:
     Example:
         >>> result = issue_construction_ban("AQI forecast predicts Severe category")
         >>> print(result)
-        '{"status": "SUCCESS", "action": "construction_ban_issued"}'
+        '{"status": "SUCCESS", "action": "construction_ban_issued", "api_mode": "mock", ...}'
     """
-    # Log the enforcement action
-    print(f"ACTION: Issuing GRAP-III stop-work orders to all non-essential construction sites. Reason: {reasoning_text}")
-    
-    # Return success status as JSON string
-    return '{"status": "SUCCESS", "action": "construction_ban_issued"}'
+    if ADAPTERS_AVAILABLE and ConstructionAPIAdapter:
+        adapter = ConstructionAPIAdapter()
+        result = adapter.issue_construction_ban(reasoning_text)
+        return json.dumps(result)
+    else:
+        # Fallback to simple mock if adapters not available
+        print(f"ACTION: Issuing GRAP-III stop-work orders to all non-essential construction sites. Reason: {reasoning_text}")
+        return json.dumps({
+            "status": "SUCCESS",
+            "action": "construction_ban_issued",
+            "api_mode": "fallback_mock"
+        })

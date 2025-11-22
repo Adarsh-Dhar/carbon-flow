@@ -147,6 +147,9 @@ def _format_output_json(prediction_data: dict[str, Any], timestamp: str) -> dict
     if prediction_data.get("avg_wind_speed_24h") is not None:
         data_sources["avg_wind_speed_24h_kmh"] = round(prediction_data["avg_wind_speed_24h"], 1)
     
+    if prediction_data.get("avg_wind_direction_24h") is not None:
+        data_sources["avg_wind_direction_24h_deg"] = round(prediction_data["avg_wind_direction_24h"], 1)
+    
     if prediction_data.get("stubble_burning_percent") is not None:
         data_sources["stubble_burning_percent"] = prediction_data["stubble_burning_percent"]
     

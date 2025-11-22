@@ -34,6 +34,14 @@ env_path = project_root / ".env"
 if env_path.exists():
     load_dotenv(env_path)
 
+# Import notification service
+try:
+    from utils.notifications import get_notification_service
+    NOTIFICATION_SERVICE_AVAILABLE = True
+except Exception:
+    NOTIFICATION_SERVICE_AVAILABLE = False
+    get_notification_service = None
+
 # Configure Gemini API key to work with CrewAI's OpenAI-compatible interface
 gemini_key = os.getenv("GEMINI_API_KEY")
 if gemini_key and not os.getenv("OPENAI_API_KEY"):
@@ -435,6 +443,46 @@ def monitor_forecast_for_severe() -> dict[str, Any] | None:
         
         if aqi_category == "Severe":
             log("⚠️  SEVERE AQI PREDICTED - Triggering enforcement agent", "WARNING")
+            
+            # Send notification for Severe AQI prediction
+            if NOTIFICATION_SERVICE_AVAILABLE and get_notification_service:
+                try:
+                    notification_service = get_notification_service()
+                    prediction = forecast_data.get("prediction", {})
+                    threshold = prediction.get("threshold", 401)
+                    hours_to_threshold = prediction.get("estimated_hours_to_threshold", 0)
+                    reasoning = forecast_data.get("reasoning", "Severe AQI predicted")
+                    
+                    # Get notification recipients from environment or use defaults
+                    email_recipients = os.getenv("NOTIFICATION_EMAIL_RECIPIENTS", "").split(",")
+                    email_recipients = [e.strip() for e in email_recipients if e.strip()]
+                    
+                    if email_recipients:
+                        subject = f"⚠️ SEVERE AQI PREDICTED - {threshold} AQI in {hours_to_threshold} hours"
+                        body = f"""
+Severe AQI Prediction Alert
+
+Predicted AQI: {threshold}
+Time to Threshold: {hours_to_threshold} hours
+Category: Severe
+
+Reasoning: {reasoning}
+
+Immediate action required: Trigger GRAP Stage III protocols.
+"""
+                        notification_service.send_email(subject, body, email_recipients)
+                    
+                    # Send push notification
+                    notification_service.send_push_notification(
+                        "Severe AQI Predicted",
+                        f"AQI will reach {threshold} (Severe) in {hours_to_threshold} hours. Immediate action required.",
+                        ["cm_delhi", "caqm_officials"]
+                    )
+                    
+                    log("Notification sent for Severe AQI prediction")
+                except Exception as e:  # noqa: BLE001
+                    log(f"Failed to send notification: {e}", "WARNING")
+            
             return forecast_data
         else:
             log(f"Forecast category '{aqi_category}' does not require enforcement")
@@ -513,6 +561,23 @@ def trigger_enforcement_agent(forecast_data: dict[str, Any]) -> dict[str, Any]:
     if result["success"]:
         last_enforcement_trigger = _current_timestamp()
         log(f"GRAP-EnforcementAgent completed at {last_enforcement_trigger}")
+        
+        # Send notification for enforcement actions
+        if NOTIFICATION_SERVICE_AVAILABLE and get_notification_service:
+            try:
+                notification_service = get_notification_service()
+                
+                # Get notification recipients
+                sms_recipients = os.getenv("NOTIFICATION_SMS_RECIPIENTS", "").split(",")
+                sms_recipients = [p.strip() for p in sms_recipients if p.strip()]
+                
+                if sms_recipients:
+                    message = f"GRAP Stage III enforcement actions executed. Construction bans, vehicle restrictions, and public notifications activated."
+                    notification_service.send_sms(message, sms_recipients)
+                
+                log("Notification sent for enforcement actions")
+            except Exception as e:  # noqa: BLE001
+                log(f"Failed to send notification: {e}", "WARNING")
     else:
         log(f"GRAP-EnforcementAgent failed: {result.get('error')}", "ERROR")
     
@@ -734,6 +799,33 @@ def detect_border_spike() -> bool:
                 f"(threshold: {SURGE_AQI_THRESHOLD})",
                 "WARNING"
             )
+            
+            # Send notification for border spike
+            if NOTIFICATION_SERVICE_AVAILABLE and get_notification_service:
+                try:
+                    notification_service = get_notification_service()
+                    
+                    # Get notification recipients
+                    email_recipients = os.getenv("NOTIFICATION_EMAIL_RECIPIENTS", "").split(",")
+                    email_recipients = [e.strip() for e in email_recipients if e.strip()]
+                    
+                    if email_recipients:
+                        subject = f"⚠️ Border Station Spike Detected: {station_name}"
+                        body = f"""
+Border Station Pollution Spike Alert
+
+Station: {station_name}
+AQI: {aqi}
+Threshold: {SURGE_AQI_THRESHOLD}
+
+This spike may indicate cross-border pollution. Accountability report will be generated.
+"""
+                        notification_service.send_email(subject, body, email_recipients)
+                    
+                    log("Notification sent for border spike")
+                except Exception as e:  # noqa: BLE001
+                    log(f"Failed to send notification: {e}", "WARNING")
+            
             return True
     
     log("No border station spikes detected")
@@ -767,6 +859,21 @@ def trigger_accountability_agent() -> dict[str, Any]:
     if result["success"]:
         last_accountability_trigger = _current_timestamp()
         log(f"InterState-AccountabilityAgent completed at {last_accountability_trigger}")
+        
+        # Send notification for accountability report
+        if NOTIFICATION_SERVICE_AVAILABLE and get_notification_service:
+            try:
+                notification_service = get_notification_service()
+                
+                notification_service.send_push_notification(
+                    "Accountability Report Generated",
+                    "New accountability report has been generated with fire correlation analysis.",
+                    ["caqm_officials", "legal_team"]
+                )
+                
+                log("Notification sent for accountability report")
+            except Exception as e:  # noqa: BLE001
+                log(f"Failed to send notification: {e}", "WARNING")
     else:
         log(f"InterState-AccountabilityAgent failed: {result.get('error')}", "ERROR")
     
