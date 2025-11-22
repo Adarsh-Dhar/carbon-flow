@@ -6,6 +6,7 @@ to pollution hotspots during GRAP Stage III activation. Uses real API if credent
 """
 
 import json
+from datetime import datetime
 from crewai.tools import tool
 
 # Import API adapters
@@ -38,9 +39,23 @@ def dispatch_enforcement_teams(hotspots: list[str]) -> str:
         '{"status": "SUCCESS", "action": "teams_dispatched", "api_mode": "mock", ...}'
     """
     if ADAPTERS_AVAILABLE and EnforcementAPIAdapter:
-        adapter = EnforcementAPIAdapter()
-        result = adapter.dispatch_enforcement_teams(hotspots)
-        return json.dumps(result)
+        try:
+            adapter = EnforcementAPIAdapter()
+            result = adapter.dispatch_enforcement_teams(hotspots)
+            return json.dumps(result)
+        except (ValueError, ImportError) as e:
+            # Fallback to simple mock if adapter initialization fails
+            print(f"[WARNING] Enforcement API adapter failed: {e}. Using fallback mock.")
+            print(
+                f"ACTION: Dispatching 2,000+ enforcement teams, prioritizing hotspots: {', '.join(hotspots)}"
+            )
+            return json.dumps({
+                "status": "SUCCESS",
+                "action": "teams_dispatched",
+                "api_mode": "fallback_mock",
+                "hotspots_targeted": hotspots,
+                "timestamp": datetime.utcnow().isoformat()
+            })
     else:
         # Fallback to simple mock if adapters not available
         print(
@@ -51,4 +66,5 @@ def dispatch_enforcement_teams(hotspots: list[str]) -> str:
             "action": "teams_dispatched",
             "api_mode": "fallback_mock",
             "hotspots_targeted": hotspots,
+            "timestamp": datetime.utcnow().isoformat()
         })

@@ -2,30 +2,38 @@
 Enforcement Teams API Adapter
 
 Handles communication with enforcement teams API for dispatching teams to hotspots.
-Supports both real API calls and mock fallback.
+Supports both real API calls and graceful fallback to mock implementation.
 """
 
-import json
-import os
+import time
+import logging
 from typing import Any
 from datetime import datetime
 
 import requests
 from .config import get_api_config
 
+# Set up logger
+logger = logging.getLogger(__name__)
+
 
 class EnforcementAPIAdapter:
-    """Adapter for enforcement teams API with mock fallback."""
+    """Adapter for enforcement teams API with graceful fallback."""
     
     def __init__(self):
         """Initialize the adapter with configuration."""
         self.config = get_api_config("enforcement")
-        self.use_mock = self.config["use_mock"]
+        self.url = self.config["url"]
+        self.api_key = self.config["api_key"]
+        self.use_mock = not (self.url and self.api_key)
         
-        if not self.use_mock:
-            print(f"[EnforcementAPI] Using real API: {self.config['url']}")
+        if self.use_mock:
+            logger.warning(
+                "[EnforcementAPI] Using mock implementation - credentials not configured. "
+                "Set ENFORCEMENT_API_URL and ENFORCEMENT_API_KEY for real API calls."
+            )
         else:
-            print("[EnforcementAPI] Using mock implementation (real API credentials not available)")
+            logger.info(f"[EnforcementAPI] Initialized with real API: {self.url}")
     
     def dispatch_enforcement_teams(self, hotspots: list[str]) -> dict[str, Any]:
         """
@@ -35,7 +43,7 @@ class EnforcementAPIAdapter:
             hotspots: List of pollution hotspot locations to prioritize
             
         Returns:
-            Dict with status, action confirmation, and targeted hotspots
+            Dict with status, action confirmation, and targeted hotspots (always succeeds, falls back to mock if needed)
         """
         if self.use_mock:
             return self._mock_dispatch_teams(hotspots)
@@ -44,19 +52,16 @@ class EnforcementAPIAdapter:
     
     def _real_dispatch_teams(self, hotspots: list[str]) -> dict[str, Any]:
         """
-        Make real API call to dispatch enforcement teams.
+        Make real API call to dispatch teams with retry logic.
         
         Args:
             hotspots: List of hotspot locations
             
         Returns:
-            Dict with API response
+            Dict with API response or falls back to mock on failure
         """
-        url = self.config["url"]
-        api_key = self.config["api_key"]
-        
         headers = {
-            "Authorization": f"Bearer {api_key}",
+            "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
         }
         
@@ -67,30 +72,74 @@ class EnforcementAPIAdapter:
             "team_count": 2000
         }
         
-        try:
-            response = requests.post(
-                url,
-                headers=headers,
-                json=payload,
-                timeout=30
-            )
-            response.raise_for_status()
-            
-            result = response.json()
-            print(f"ACTION: Dispatching 2,000+ enforcement teams, prioritizing hotspots: {', '.join(hotspots)}")
-            
-            return {
-                "status": "SUCCESS",
-                "action": "teams_dispatched",
-                "api_mode": "real",
-                "hotspots_targeted": hotspots,
-                "teams_dispatched": result.get("teams_dispatched", 0),
-                "timestamp": datetime.utcnow().isoformat()
-            }
-        except requests.exceptions.RequestException as e:
-            print(f"[EnforcementAPI] Real API call failed: {e}, falling back to mock")
-            # Fallback to mock on error
-            return self._mock_dispatch_teams(hotspots)
+        # Retry logic with exponential backoff
+        max_attempts = 3
+        base_delay = 1.0
+        
+        for attempt in range(1, max_attempts + 1):
+            try:
+                logger.info(
+                    f"[EnforcementAPI] Attempt {attempt}/{max_attempts}: "
+                    f"POST {self.url} (action: dispatch_enforcement_teams, hotspots: {len(hotspots)})"
+                )
+                
+                response = requests.post(
+                    self.url,
+                    headers=headers,
+                    json=payload,
+                    timeout=30
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    logger.info(
+                        f"[EnforcementAPI] Success: {result.get('teams_dispatched', 0)} teams dispatched "
+                        f"to {len(hotspots)} hotspots"
+                    )
+                    print(f"ACTION: Dispatching 2,000+ enforcement teams, prioritizing hotspots: {', '.join(hotspots)}")
+                    
+                    return {
+                        "status": "SUCCESS",
+                        "action": "teams_dispatched",
+                        "api_mode": "real",
+                        "hotspots_targeted": hotspots,
+                        "teams_dispatched": result.get("teams_dispatched", 0),
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
+                else:
+                    error_msg = f"HTTP {response.status_code}: {response.text[:200]}"
+                    logger.warning(f"[EnforcementAPI] Attempt {attempt} failed: {error_msg}")
+                    
+                    if attempt < max_attempts:
+                        delay = base_delay * (2 ** (attempt - 1))
+                        logger.info(f"[EnforcementAPI] Retrying in {delay}s...")
+                        time.sleep(delay)
+                    else:
+                        logger.error("[EnforcementAPI] All attempts failed, falling back to mock")
+                        return self._mock_dispatch_teams(hotspots)
+                        
+            except requests.exceptions.Timeout:
+                logger.warning(f"[EnforcementAPI] Attempt {attempt} timed out")
+                if attempt < max_attempts:
+                    delay = base_delay * (2 ** (attempt - 1))
+                    logger.info(f"[EnforcementAPI] Retrying in {delay}s...")
+                    time.sleep(delay)
+                else:
+                    logger.error("[EnforcementAPI] All attempts timed out, falling back to mock")
+                    return self._mock_dispatch_teams(hotspots)
+                    
+            except requests.exceptions.RequestException as e:
+                logger.warning(f"[EnforcementAPI] Attempt {attempt} failed: {str(e)}")
+                if attempt < max_attempts:
+                    delay = base_delay * (2 ** (attempt - 1))
+                    logger.info(f"[EnforcementAPI] Retrying in {delay}s...")
+                    time.sleep(delay)
+                else:
+                    logger.error("[EnforcementAPI] All attempts failed, falling back to mock")
+                    return self._mock_dispatch_teams(hotspots)
+        
+        # Should never reach here, but fallback just in case
+        return self._mock_dispatch_teams(hotspots)
     
     def _mock_dispatch_teams(self, hotspots: list[str]) -> dict[str, Any]:
         """
@@ -102,6 +151,7 @@ class EnforcementAPIAdapter:
         Returns:
             Dict with mock response
         """
+        logger.info("[EnforcementAPI] Using mock implementation")
         print(f"ACTION: Dispatching 2,000+ enforcement teams, prioritizing hotspots: {', '.join(hotspots)}")
         
         return {

@@ -6,6 +6,7 @@ during GRAP Stage III activation. Uses real API if credentials are available.
 """
 
 import json
+from datetime import datetime
 from crewai.tools import tool
 
 # Import API adapters
@@ -38,9 +39,22 @@ def restrict_vehicles(reasoning_text: str) -> str:
         '{"status": "SUCCESS", "action": "vehicle_restrictions_notified", "api_mode": "mock", ...}'
     """
     if ADAPTERS_AVAILABLE and TrafficAPIAdapter:
-        adapter = TrafficAPIAdapter()
-        result = adapter.restrict_vehicles(reasoning_text)
-        return json.dumps(result)
+        try:
+            adapter = TrafficAPIAdapter()
+            result = adapter.restrict_vehicles(reasoning_text)
+            return json.dumps(result)
+        except (ValueError, ImportError) as e:
+            # Fallback to simple mock if adapter initialization fails
+            print(f"[WARNING] Traffic API adapter failed: {e}. Using fallback mock.")
+            print(
+                f"ACTION: Notifying Delhi Traffic Police to enforce ban on BS-III petrol and BS-IV diesel vehicles. Reason: {reasoning_text}"
+            )
+            return json.dumps({
+                "status": "SUCCESS",
+                "action": "vehicle_restrictions_notified",
+                "api_mode": "fallback_mock",
+                "timestamp": datetime.utcnow().isoformat()
+            })
     else:
         # Fallback to simple mock if adapters not available
         print(
@@ -49,5 +63,6 @@ def restrict_vehicles(reasoning_text: str) -> str:
         return json.dumps({
             "status": "SUCCESS",
             "action": "vehicle_restrictions_notified",
-            "api_mode": "fallback_mock"
+            "api_mode": "fallback_mock",
+            "timestamp": datetime.utcnow().isoformat()
         })

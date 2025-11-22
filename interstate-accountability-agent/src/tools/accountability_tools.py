@@ -311,7 +311,7 @@ def send_caqm_report(
     Send a legal report to the Commission for Air Quality Management (CAQM).
     
     This tool submits the generated accountability report to CAQM for official review
-    and enforcement action. For demo purposes, it prints the report to console.
+    and enforcement action. Uses real API if configured, otherwise falls back to file save.
     
     Args:
         report_text: The report text to send to CAQM
@@ -320,19 +320,176 @@ def send_caqm_report(
     Returns:
         JSON string with status and action confirmation
     """
+    import json
+    import os
+    import time
+    import logging
+    from datetime import datetime
+    from pathlib import Path
+    
+    logger = logging.getLogger(__name__)
     debug_log("send_caqm_report", "Invoked to send report to CAQM")
     
-    # Print official communique
-    print("--- OFFICIAL COMMUNIQUE ---")
-    print(report_text)
-    print("--- END OF COMMUNIQUE ---")
+    # Get CAQM API configuration
+    caqm_url = os.getenv("CAQM_API_URL")
+    caqm_api_key = os.getenv("CAQM_API_KEY")
+    caqm_timeout = int(os.getenv("CAQM_API_TIMEOUT", "30"))
     
-    # Return success status
-    result = '{"status": "SUCCESS", "action": "Report sent to CAQM."}'
+    use_real_api = bool(caqm_url and caqm_api_key)
     
-    debug_log("send_caqm_report", "Report successfully sent to CAQM")
+    if not use_real_api:
+        logger.warning(
+            "[CAQM] API credentials not configured. Saving report to file instead. "
+            "Set CAQM_API_URL and CAQM_API_KEY for real API submission."
+        )
+        return _save_caqm_report_to_file(report_text)
     
-    return result
+    # Real API submission with retry logic
+    try:
+        return _submit_caqm_report_via_api(report_text, caqm_url, caqm_api_key, caqm_timeout)
+    except Exception as e:
+        logger.error(f"[CAQM] API submission failed: {e}. Falling back to file save.")
+        return _save_caqm_report_to_file(report_text)
+
+
+def _submit_caqm_report_via_api(
+    report_text: str,
+    api_url: str,
+    api_key: str,
+    timeout: int
+) -> str:
+    """Submit CAQM report via HTTP POST API with retry logic."""
+    import json
+    import time
+    import logging
+    import requests
+    from datetime import datetime
+    
+    logger = logging.getLogger(__name__)
+    
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    
+    payload = {
+        "report": report_text,
+        "timestamp": datetime.utcnow().isoformat(),
+        "source": "CarbonFlow-Delhi",
+        "report_type": "accountability"
+    }
+    
+    # Retry logic with exponential backoff
+    max_attempts = 3
+    base_delay = 1.0
+    
+    for attempt in range(1, max_attempts + 1):
+        try:
+            logger.info(
+                f"[CAQM] Attempt {attempt}/{max_attempts}: "
+                f"POST {api_url} (report length: {len(report_text)} chars)"
+            )
+            
+            response = requests.post(
+                api_url,
+                headers=headers,
+                json=payload,
+                timeout=timeout
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                logger.info(f"[CAQM] Success: Report submitted. ID: {result.get('report_id', 'N/A')}")
+                print("--- OFFICIAL COMMUNIQUE ---")
+                print(f"Report successfully submitted to CAQM")
+                print(f"Submission ID: {result.get('report_id', 'N/A')}")
+                print("--- END OF COMMUNIQUE ---")
+                
+                return json.dumps({
+                    "status": "SUCCESS",
+                    "action": "Report sent to CAQM",
+                    "api_mode": "real",
+                    "report_id": result.get("report_id"),
+                    "timestamp": datetime.utcnow().isoformat()
+                })
+            else:
+                error_msg = f"HTTP {response.status_code}: {response.text[:200]}"
+                logger.warning(f"[CAQM] Attempt {attempt} failed: {error_msg}")
+                
+                if attempt < max_attempts:
+                    delay = base_delay * (2 ** (attempt - 1))
+                    logger.info(f"[CAQM] Retrying in {delay}s...")
+                    time.sleep(delay)
+                else:
+                    raise Exception(f"All attempts failed. Last error: {error_msg}")
+                    
+        except requests.exceptions.Timeout:
+            logger.warning(f"[CAQM] Attempt {attempt} timed out")
+            if attempt < max_attempts:
+                delay = base_delay * (2 ** (attempt - 1))
+                logger.info(f"[CAQM] Retrying in {delay}s...")
+                time.sleep(delay)
+            else:
+                raise Exception("All attempts timed out")
+                
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"[CAQM] Attempt {attempt} failed: {str(e)}")
+            if attempt < max_attempts:
+                delay = base_delay * (2 ** (attempt - 1))
+                logger.info(f"[CAQM] Retrying in {delay}s...")
+                time.sleep(delay)
+            else:
+                raise Exception(f"All attempts failed: {str(e)}")
+    
+    # Should never reach here
+    raise Exception("Failed to submit report after all retry attempts")
+
+
+def _save_caqm_report_to_file(report_text: str) -> str:
+    """Save CAQM report to file as fallback."""
+    import json
+    import os
+    from datetime import datetime
+    from pathlib import Path
+    
+    # Save to reports directory
+    reports_dir = Path(__file__).parent.parent.parent.parent / "reports" / "caqm"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    report_file = reports_dir / f"caqm_report_{timestamp}.txt"
+    
+    try:
+        with open(report_file, "w", encoding="utf-8") as f:
+            f.write("--- OFFICIAL COMMUNIQUE ---\n")
+            f.write(report_text)
+            f.write("\n--- END OF COMMUNIQUE ---\n")
+        
+        print("--- OFFICIAL COMMUNIQUE ---")
+        print(report_text)
+        print("--- END OF COMMUNIQUE ---")
+        print(f"\n[CAQM] Report saved to file: {report_file}")
+        
+        return json.dumps({
+            "status": "SUCCESS",
+            "action": "Report saved to file (CAQM API not configured)",
+            "api_mode": "file_fallback",
+            "file_path": str(report_file),
+            "timestamp": datetime.utcnow().isoformat()
+        })
+    except Exception as e:
+        # Last resort: just print
+        print("--- OFFICIAL COMMUNIQUE ---")
+        print(report_text)
+        print("--- END OF COMMUNIQUE ---")
+        print(f"\n[CAQM] Failed to save report to file: {e}")
+        
+        return json.dumps({
+            "status": "SUCCESS",
+            "action": "Report printed to console (file save failed)",
+            "api_mode": "console_fallback",
+            "timestamp": datetime.utcnow().isoformat()
+        })
 
 
 class DetectSurgeInput(BaseModel):

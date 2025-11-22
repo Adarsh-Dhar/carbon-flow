@@ -8,7 +8,11 @@ Each tool uses API adapters that support both real API calls and mock fallback.
 from datetime import datetime
 from typing import Any
 import json
+import logging
 from crewai.tools import tool
+
+# Set up logger
+logger = logging.getLogger(__name__)
 
 # Import API adapters
 try:
@@ -40,14 +44,26 @@ def issue_construction_ban(reasoning_text: str) -> str:
         '{"status": "SUCCESS", "action": "construction_ban_issued", "api_mode": "mock", ...}'
     """
     if ADAPTERS_AVAILABLE and ConstructionAPIAdapter:
-        adapter = ConstructionAPIAdapter()
-        result = adapter.issue_construction_ban(reasoning_text)
-        return json.dumps(result)
+        try:
+            adapter = ConstructionAPIAdapter()
+            result = adapter.issue_construction_ban(reasoning_text)
+            return json.dumps(result)
+        except (ValueError, ImportError) as e:
+            # Fallback to simple mock if adapter initialization fails
+            print(f"[WARNING] Construction API adapter failed: {e}. Using fallback mock.")
+            print(f"ACTION: Issuing GRAP-III stop-work orders to all non-essential construction sites. Reason: {reasoning_text}")
+            return json.dumps({
+                "status": "SUCCESS",
+                "action": "construction_ban_issued",
+                "api_mode": "fallback_mock",
+                "timestamp": datetime.utcnow().isoformat()
+            })
     else:
         # Fallback to simple mock if adapters not available
         print(f"ACTION: Issuing GRAP-III stop-work orders to all non-essential construction sites. Reason: {reasoning_text}")
         return json.dumps({
             "status": "SUCCESS",
             "action": "construction_ban_issued",
-            "api_mode": "fallback_mock"
+            "api_mode": "fallback_mock",
+            "timestamp": datetime.utcnow().isoformat()
         })

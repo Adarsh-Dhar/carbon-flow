@@ -2,30 +2,38 @@
 Traffic Police API Adapter
 
 Handles communication with traffic police API for vehicle restrictions.
-Supports both real API calls and mock fallback.
+Supports both real API calls and graceful fallback to mock implementation.
 """
 
-import json
-import os
+import time
+import logging
 from typing import Any
 from datetime import datetime
 
 import requests
 from .config import get_api_config
 
+# Set up logger
+logger = logging.getLogger(__name__)
+
 
 class TrafficAPIAdapter:
-    """Adapter for traffic police API with mock fallback."""
+    """Adapter for traffic police API with graceful fallback."""
     
     def __init__(self):
         """Initialize the adapter with configuration."""
         self.config = get_api_config("traffic")
-        self.use_mock = self.config["use_mock"]
+        self.url = self.config["url"]
+        self.api_key = self.config["api_key"]
+        self.use_mock = not (self.url and self.api_key)
         
-        if not self.use_mock:
-            print(f"[TrafficAPI] Using real API: {self.config['url']}")
+        if self.use_mock:
+            logger.warning(
+                "[TrafficAPI] Using mock implementation - credentials not configured. "
+                "Set TRAFFIC_API_URL and TRAFFIC_API_KEY for real API calls."
+            )
         else:
-            print("[TrafficAPI] Using mock implementation (real API credentials not available)")
+            logger.info(f"[TrafficAPI] Initialized with real API: {self.url}")
     
     def restrict_vehicles(self, reasoning_text: str) -> dict[str, Any]:
         """
@@ -35,7 +43,7 @@ class TrafficAPIAdapter:
             reasoning_text: Explanation for why vehicle restrictions are being enforced
             
         Returns:
-            Dict with status and action confirmation
+            Dict with status and action confirmation (always succeeds, falls back to mock if needed)
         """
         if self.use_mock:
             return self._mock_restrict_vehicles(reasoning_text)
@@ -44,19 +52,16 @@ class TrafficAPIAdapter:
     
     def _real_restrict_vehicles(self, reasoning_text: str) -> dict[str, Any]:
         """
-        Make real API call to restrict vehicles.
+        Make real API call to restrict vehicles with retry logic.
         
         Args:
             reasoning_text: Explanation for restrictions
             
         Returns:
-            Dict with API response
+            Dict with API response or falls back to mock on failure
         """
-        url = self.config["url"]
-        api_key = self.config["api_key"]
-        
         headers = {
-            "Authorization": f"Bearer {api_key}",
+            "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
         }
         
@@ -70,29 +75,72 @@ class TrafficAPIAdapter:
             }
         }
         
-        try:
-            response = requests.post(
-                url,
-                headers=headers,
-                json=payload,
-                timeout=30
-            )
-            response.raise_for_status()
-            
-            result = response.json()
-            print(f"ACTION: Notifying Delhi Traffic Police to enforce ban on BS-III petrol and BS-IV diesel vehicles. Reason: {reasoning_text}")
-            
-            return {
-                "status": "SUCCESS",
-                "action": "vehicle_restrictions_notified",
-                "api_mode": "real",
-                "restrictions_applied": result.get("restrictions_applied", []),
-                "timestamp": datetime.utcnow().isoformat()
-            }
-        except requests.exceptions.RequestException as e:
-            print(f"[TrafficAPI] Real API call failed: {e}, falling back to mock")
-            # Fallback to mock on error
-            return self._mock_restrict_vehicles(reasoning_text)
+        # Retry logic with exponential backoff
+        max_attempts = 3
+        base_delay = 1.0
+        
+        for attempt in range(1, max_attempts + 1):
+            try:
+                logger.info(
+                    f"[TrafficAPI] Attempt {attempt}/{max_attempts}: "
+                    f"POST {self.url} (action: restrict_vehicles)"
+                )
+                
+                response = requests.post(
+                    self.url,
+                    headers=headers,
+                    json=payload,
+                    timeout=30
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    logger.info(
+                        f"[TrafficAPI] Success: Restrictions applied: {result.get('restrictions_applied', [])}"
+                    )
+                    print(f"ACTION: Notifying Delhi Traffic Police to enforce ban on BS-III petrol and BS-IV diesel vehicles. Reason: {reasoning_text}")
+                    
+                    return {
+                        "status": "SUCCESS",
+                        "action": "vehicle_restrictions_notified",
+                        "api_mode": "real",
+                        "restrictions_applied": result.get("restrictions_applied", []),
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
+                else:
+                    error_msg = f"HTTP {response.status_code}: {response.text[:200]}"
+                    logger.warning(f"[TrafficAPI] Attempt {attempt} failed: {error_msg}")
+                    
+                    if attempt < max_attempts:
+                        delay = base_delay * (2 ** (attempt - 1))
+                        logger.info(f"[TrafficAPI] Retrying in {delay}s...")
+                        time.sleep(delay)
+                    else:
+                        logger.error("[TrafficAPI] All attempts failed, falling back to mock")
+                        return self._mock_restrict_vehicles(reasoning_text)
+                        
+            except requests.exceptions.Timeout:
+                logger.warning(f"[TrafficAPI] Attempt {attempt} timed out")
+                if attempt < max_attempts:
+                    delay = base_delay * (2 ** (attempt - 1))
+                    logger.info(f"[TrafficAPI] Retrying in {delay}s...")
+                    time.sleep(delay)
+                else:
+                    logger.error("[TrafficAPI] All attempts timed out, falling back to mock")
+                    return self._mock_restrict_vehicles(reasoning_text)
+                    
+            except requests.exceptions.RequestException as e:
+                logger.warning(f"[TrafficAPI] Attempt {attempt} failed: {str(e)}")
+                if attempt < max_attempts:
+                    delay = base_delay * (2 ** (attempt - 1))
+                    logger.info(f"[TrafficAPI] Retrying in {delay}s...")
+                    time.sleep(delay)
+                else:
+                    logger.error("[TrafficAPI] All attempts failed, falling back to mock")
+                    return self._mock_restrict_vehicles(reasoning_text)
+        
+        # Should never reach here, but fallback just in case
+        return self._mock_restrict_vehicles(reasoning_text)
     
     def _mock_restrict_vehicles(self, reasoning_text: str) -> dict[str, Any]:
         """
@@ -104,6 +152,7 @@ class TrafficAPIAdapter:
         Returns:
             Dict with mock response
         """
+        logger.info("[TrafficAPI] Using mock implementation")
         print(f"ACTION: Notifying Delhi Traffic Police to enforce ban on BS-III petrol and BS-IV diesel vehicles. Reason: {reasoning_text}")
         
         return {

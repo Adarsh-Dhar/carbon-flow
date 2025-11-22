@@ -18,40 +18,21 @@ if env_path.exists():
 
 def should_use_mock_apis() -> bool:
     """
-    Determine if mock APIs should be used.
+    Determine if mock APIs should be used globally.
+    
+    This function checks for an explicit global flag. Individual APIs
+    can still work independently based on their own credentials.
     
     Returns:
-        True if mock APIs should be used, False if real APIs should be used
+        True if mock APIs should be used globally, False otherwise
     """
     # Check for explicit flag
     use_mock = os.getenv("USE_MOCK_APIS", "").lower()
     if use_mock in ("true", "1", "yes"):
         return True
     
-    # Check if real API credentials are available
-    # If any required credential is missing, use mock
-    construction_url = os.getenv("CONSTRUCTION_API_URL")
-    construction_key = os.getenv("CONSTRUCTION_API_KEY")
-    
-    traffic_url = os.getenv("TRAFFIC_API_URL")
-    traffic_key = os.getenv("TRAFFIC_API_KEY")
-    
-    education_url = os.getenv("EDUCATION_API_URL")
-    education_key = os.getenv("EDUCATION_API_KEY")
-    
-    enforcement_url = os.getenv("ENFORCEMENT_API_URL")
-    enforcement_key = os.getenv("ENFORCEMENT_API_KEY")
-    
-    # If all APIs have credentials, use real APIs
-    # Otherwise, use mock
-    has_all_credentials = all([
-        construction_url and construction_key,
-        traffic_url and traffic_key,
-        education_url and education_key,
-        enforcement_url and enforcement_key,
-    ])
-    
-    return not has_all_credentials
+    # If no explicit flag, allow individual APIs to work independently
+    return False
 
 
 def get_api_config(api_name: str) -> dict[str, Any]:
@@ -88,7 +69,12 @@ def get_api_config(api_name: str) -> dict[str, Any]:
     config = config_map.get(api_name_lower, {"url": None, "api_key": None})
     
     # Determine if mock should be used for this specific API
-    use_mock = should_use_mock_apis() or not (config["url"] and config["api_key"])
+    # Check global flag first, then check if this specific API has credentials
+    global_use_mock = should_use_mock_apis()
+    has_credentials = bool(config["url"] and config["api_key"])
+    
+    # Use mock if global flag is set OR if this specific API lacks credentials
+    use_mock = global_use_mock or not has_credentials
     
     return {
         "url": config["url"],

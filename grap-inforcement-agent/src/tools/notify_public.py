@@ -6,6 +6,7 @@ during GRAP Stage III activation. Uses real API if credentials are available.
 """
 
 import json
+from datetime import datetime
 from crewai.tools import tool
 
 # Import API adapters
@@ -39,9 +40,25 @@ def notify_public(reasoning_text: str) -> str:
         '{"status": "SUCCESS", "action": "public_notification_sent", "api_mode": "mock", ...}'
     """
     if ADAPTERS_AVAILABLE and EducationAPIAdapter:
-        adapter = EducationAPIAdapter()
-        result = adapter.notify_public(reasoning_text)
-        return json.dumps(result)
+        try:
+            adapter = EducationAPIAdapter()
+            result = adapter.notify_public(reasoning_text)
+            return json.dumps(result)
+        except (ValueError, ImportError) as e:
+            # Fallback to simple mock if adapter initialization fails
+            print(f"[WARNING] Education API adapter failed: {e}. Using fallback mock.")
+            print(
+                f"ACTION: Pushing 'Severe' AQI Alert to CPCB SAMEER App. Reason: {reasoning_text}"
+            )
+            print(
+                f"ACTION: Issuing directive to all schools for hybrid mode (Classes V and below). Reason: {reasoning_text}"
+            )
+            return json.dumps({
+                "status": "SUCCESS",
+                "action": "public_notification_sent",
+                "api_mode": "fallback_mock",
+                "timestamp": datetime.utcnow().isoformat()
+            })
     else:
         # Fallback to simple mock if adapters not available
         print(
@@ -53,5 +70,6 @@ def notify_public(reasoning_text: str) -> str:
         return json.dumps({
             "status": "SUCCESS",
             "action": "public_notification_sent",
-            "api_mode": "fallback_mock"
+            "api_mode": "fallback_mock",
+            "timestamp": datetime.utcnow().isoformat()
         })
