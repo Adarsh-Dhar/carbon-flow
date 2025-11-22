@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import boto3
+import numpy as np
 import pandas as pd
 import streamlit as st
 from crewai import Crew, Process
@@ -25,7 +26,7 @@ from dotenv import load_dotenv
 import importlib.util
 from datetime import datetime
 import folium
-from streamlit_folium import folium_static
+from streamlit_folium import st_folium
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
@@ -666,6 +667,9 @@ def load_data_from_s3():
                                 
                                 try:
                                     aqi_val = float(aqi)
+                                    # Skip if NaN or invalid
+                                    if pd.isna(aqi_val) or not np.isfinite(aqi_val):
+                                        continue
                                     # Color based on AQI levels
                                     if aqi_val > 400:
                                         color = "#8B0000"  # Dark red - Severe
@@ -757,6 +761,10 @@ def create_interactive_map(
         value = row.get("value", 0)
         color = row.get("color", "#808080")
         size = row.get("size", 10)
+        
+        # Skip if value is NaN or invalid
+        if pd.isna(value) or not np.isfinite(value):
+            value = 0
         
         if pd.notna(lat) and pd.notna(lon):
             # Determine AQI category
@@ -853,30 +861,33 @@ def create_interactive_map(
         wind_speed = ds.get("avg_wind_speed_24h_kmh")
         
         if wind_direction is not None and wind_speed is not None:
-            # Convert wind direction to radians
-            import math
-            wind_rad = math.radians(wind_direction - 90)  # Adjust for map orientation
-            
-            # Calculate arrow endpoint (longer arrow for higher wind speed)
-            arrow_length = 0.1 * (wind_speed / 20)  # Scale based on wind speed
-            end_lat = delhi_center[0] + arrow_length * math.cos(wind_rad)
-            end_lon = delhi_center[1] + arrow_length * math.sin(wind_rad)
-            
-            # Add wind direction arrow with better styling
-            arrow_length_km = wind_speed * 0.05  # Scale arrow length by wind speed
-            arrow_length_deg = arrow_length_km / 111.0  # Convert km to degrees
-            
-            end_lat = delhi_center[0] + arrow_length_deg * math.cos(wind_rad)
-            end_lon = delhi_center[1] + arrow_length_deg * math.sin(wind_rad)
-            
-            # Create wind arrow with gradient effect
-            folium.PolyLine(
-                locations=[[delhi_center[0], delhi_center[1]], [end_lat, end_lon]],
-                color="#3b82f6",
-                weight=4,
-                opacity=0.8,
-                tooltip=f"🌬️ Wind: {wind_direction:.0f}° at {wind_speed:.1f} km/h"
-            ).add_to(m)
+            # Skip if values are NaN or invalid
+            if not (pd.isna(wind_direction) or pd.isna(wind_speed) or 
+                    not np.isfinite(wind_direction) or not np.isfinite(wind_speed)):
+                # Convert wind direction to radians
+                import math
+                wind_rad = math.radians(wind_direction - 90)  # Adjust for map orientation
+                
+                # Calculate arrow endpoint (longer arrow for higher wind speed)
+                # Ensure wind_speed is not zero to avoid division issues
+                wind_speed_safe = max(wind_speed, 0.1) if wind_speed > 0 else 0.1
+                arrow_length = 0.1 * (wind_speed_safe / 20)  # Scale based on wind speed
+                
+                # Add wind direction arrow with better styling
+                arrow_length_km = wind_speed_safe * 0.05  # Scale arrow length by wind speed
+                arrow_length_deg = arrow_length_km / 111.0  # Convert km to degrees
+                
+                end_lat = delhi_center[0] + arrow_length_deg * math.cos(wind_rad)
+                end_lon = delhi_center[1] + arrow_length_deg * math.sin(wind_rad)
+                
+                # Create wind arrow with gradient effect
+                folium.PolyLine(
+                    locations=[[delhi_center[0], delhi_center[1]], [end_lat, end_lon]],
+                    color="#3b82f6",
+                    weight=4,
+                    opacity=0.8,
+                    tooltip=f"🌬️ Wind: {wind_direction:.0f}° at {wind_speed_safe:.1f} km/h"
+                ).add_to(m)
             
             # Add wind direction indicator circle at center
             folium.CircleMarker(
@@ -1229,6 +1240,8 @@ else:
         aqi_records = data[data["type"] == "AQI"]
         if not aqi_records.empty:
             delhi_avg_aqi = aqi_records["value"].mean()
+            if pd.isna(delhi_avg_aqi):
+                delhi_avg_aqi = 0
             if delhi_avg_aqi > 400:
                 aqi_category = "Severe"
             elif delhi_avg_aqi > 300:
@@ -1282,10 +1295,11 @@ with col1:
     """
     st.markdown(metric_card_html, unsafe_allow_html=True)
     st.metric(
-        label="",
+        label="AQI",
         value=f"{int(delhi_avg_aqi)}" if delhi_avg_aqi > 0 else "N/A",
         delta=aqi_category if delhi_avg_aqi > 0 else None,
-        delta_color=aqi_delta_color if delhi_avg_aqi > 0 else "off"
+        delta_color=aqi_delta_color if delhi_avg_aqi > 0 else "off",
+        label_visibility="hidden"
     )
 
 with col2:
@@ -1300,10 +1314,11 @@ with col2:
     """
     st.markdown(metric_card_html, unsafe_allow_html=True)
     st.metric(
-        label="",
+        label="Active Fires",
         value=f"{int(active_fires)}" if active_fires > 0 else "0",
         delta=fire_delta if fire_delta != "N/A" else None,
-        delta_color="inverse" if fire_delta != "N/A" and fire_delta.startswith("+") else "off"
+        delta_color="inverse" if fire_delta != "N/A" and fire_delta.startswith("+") else "off",
+        label_visibility="hidden"
     )
 
 with col3:
@@ -1324,10 +1339,11 @@ with col3:
     """
     st.markdown(metric_card_html, unsafe_allow_html=True)
     st.metric(
-        label="",
+        label="Stubble Contribution",
         value=f"{stubble_contribution:.1f}%" if stubble_contribution > 0 else "N/A",
         delta=stubble_status if stubble_contribution > 0 else None,
-        delta_color=stubble_delta_color if stubble_contribution > 0 else "off"
+        delta_color=stubble_delta_color if stubble_contribution > 0 else "off",
+        label_visibility="hidden"
     )
 
 with col4:
@@ -1361,10 +1377,11 @@ with col4:
         """
         st.markdown(metric_card_html, unsafe_allow_html=True)
         st.metric(
-            label="",
+            label="Predicted AQI",
             value=f"{int(predicted_aqi)} ({predicted_category})" if predicted_aqi > 0 else "N/A",
             delta=delta_text,
-            delta_color=pred_delta_color if predicted_aqi > 0 else "off"
+            delta_color=pred_delta_color if predicted_aqi > 0 else "off",
+            label_visibility="hidden"
         )
     else:
         metric_card_html = """
@@ -1377,9 +1394,10 @@ with col4:
         """
         st.markdown(metric_card_html, unsafe_allow_html=True)
         st.metric(
-            label="",
+            label="Predicted AQI",
             value="N/A",
-            delta=None
+            delta=None,
+            label_visibility="hidden"
         )
 
 # Proactive Alert System with Enhanced Styling
@@ -1538,7 +1556,7 @@ if not data.empty:
         
         # Create and display interactive map
         interactive_map = create_interactive_map(filtered_data, forecast_data)
-        folium_static(interactive_map, width=1200, height=600)
+        st_folium(interactive_map, width=1200, height=600, returned_objects=[])
         
         # Show statistics
         col_stat1, col_stat2, col_stat3 = st.columns(3)
@@ -1549,6 +1567,8 @@ if not data.empty:
         with col_stat3:
             if not aqi_data.empty:
                 avg_aqi = aqi_data["value"].mean()
+                if pd.isna(avg_aqi):
+                    avg_aqi = 0
                 st.metric("Avg AQI", f"{avg_aqi:.0f}")
         
         # Show correlation hint if accountability report exists
@@ -1561,15 +1581,15 @@ if not data.empty:
                     st.success(f"✅ {total_fires} fires correlated with border station surges (see Accountability tab)")
     else:
         st.warning("No data matches the selected filters. Please adjust your filter settings.")
-    else:
-        empty_state_html = """
-        <div class="empty-state">
-            <div style="font-size: 3rem; margin-bottom: 1rem;">📍</div>
-            <h3 style="color: #64748b; margin-bottom: 0.5rem;">No Sensor Data Available</h3>
-            <p style="color: #94a3b8;">Run Sensor Ingest Agent to load data.</p>
-        </div>
-        """
-        st.markdown(empty_state_html, unsafe_allow_html=True)
+else:
+    empty_state_html = """
+    <div class="empty-state">
+        <div style="font-size: 3rem; margin-bottom: 1rem;">📍</div>
+        <h3 style="color: #64748b; margin-bottom: 0.5rem;">No Sensor Data Available</h3>
+        <p style="color: #94a3b8;">Run Sensor Ingest Agent to load data.</p>
+    </div>
+    """
+    st.markdown(empty_state_html, unsafe_allow_html=True)
 
 # Wind Direction Indicator
 render_wind_direction_indicator(forecast_data)
@@ -2208,14 +2228,19 @@ with tab6:
                 
                 if not aqi_data.empty and create_aqi_heatmap:
                     heat_map = create_aqi_heatmap(aqi_data)
-                    folium_static(heat_map, width=1200, height=600)
+                    st_folium(heat_map, width=1200, height=600, returned_objects=[])
                     
                     # Show statistics
                     col1, col2, col3 = st.columns(3)
                     with col1:
                         st.metric("Stations", len(aqi_data))
                     with col2:
-                        avg_aqi = aqi_data["value"].mean() if "value" in aqi_data.columns else 0
+                        if "value" in aqi_data.columns:
+                            avg_aqi = aqi_data["value"].mean()
+                            if pd.isna(avg_aqi):
+                                avg_aqi = 0
+                        else:
+                            avg_aqi = 0
                         st.metric("Avg AQI", f"{avg_aqi:.0f}")
                     with col3:
                         max_aqi = aqi_data["value"].max() if "value" in aqi_data.columns else 0
