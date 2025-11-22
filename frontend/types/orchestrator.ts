@@ -32,7 +32,7 @@ export interface ForecastData {
   confidence_level: number
   reasoning: string
   timestamp: string
-  data_sources: ForecastDataSources
+  data_sources?: ForecastDataSources
 }
 
 export interface CPCBStation {

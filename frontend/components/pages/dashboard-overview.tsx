@@ -17,7 +17,7 @@ interface ForecastData {
   confidence_level: number
   reasoning: string
   timestamp: string
-  data_sources: {
+  data_sources?: {
     cpcb_aqi?: number
     nasa_fire_count?: number
     avg_wind_speed_24h_kmh?: number
@@ -61,6 +61,9 @@ export default function DashboardOverview() {
     return <div className="p-8 text-slate-400">Failed to load forecast data</div>
   }
 
+  // Safely extract data_sources with fallback
+  const dataSources = forecast.data_sources || {}
+
   return (
     <div className="p-8 space-y-8">
       {/* Hero Section */}
@@ -70,21 +73,21 @@ export default function DashboardOverview() {
             <h2 className="text-slate-400 text-sm font-semibold mb-2">CURRENT AIR QUALITY</h2>
             <div className="flex items-baseline gap-4 mb-4">
               <div className="text-5xl font-bold text-slate-50">
-                {forecast.data_sources.cpcb_aqi || 'N/A'}
+                {dataSources.cpcb_aqi ?? 'N/A'}
               </div>
               <AQIBadge 
-                aqi={forecast.data_sources.cpcb_aqi || 0} 
-                category={forecast.prediction.aqi_category}
+                aqi={dataSources.cpcb_aqi ?? 0} 
+                category={forecast.prediction?.aqi_category || 'Unknown'}
                 size="lg"
               />
             </div>
             <p className="text-slate-300">
-              24-hour forecast: <span className="font-semibold">{forecast.prediction.aqi_category}</span>
+              24-hour forecast: <span className="font-semibold">{forecast.prediction?.aqi_category || 'Unknown'}</span>
             </p>
           </div>
           <div className="text-right">
             <TrendingUp className="w-12 h-12 text-blue-400 mb-2 ml-auto" />
-            <p className="text-slate-400 text-sm">Confidence: <span className="font-semibold text-slate-300">{forecast.confidence_level}%</span></p>
+            <p className="text-slate-400 text-sm">Confidence: <span className="font-semibold text-slate-300">{forecast.confidence_level ?? 0}%</span></p>
           </div>
         </div>
       </div>
@@ -93,26 +96,26 @@ export default function DashboardOverview() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <MetricCard
           title="Current AQI"
-          value={forecast.data_sources.cpcb_aqi || '—'}
+          value={dataSources.cpcb_aqi ?? '—'}
           unit="µg/m³"
           icon={<TrendingUp className="w-5 h-5" />}
         />
         <MetricCard
           title="Fire Count"
-          value={forecast.data_sources.nasa_fire_count || 0}
+          value={dataSources.nasa_fire_count ?? 0}
           trend="stable"
           description="NASA FIRMS detection"
         />
         <MetricCard
           title="Wind Speed"
-          value={forecast.data_sources.avg_wind_speed_24h_kmh || '—'}
+          value={dataSources.avg_wind_speed_24h_kmh ?? '—'}
           unit="km/h"
           icon={<Wind className="w-5 h-5" />}
           description="24h average"
         />
         <MetricCard
           title="Stubble Burning"
-          value={forecast.data_sources.stubble_burning_percent || 0}
+          value={dataSources.stubble_burning_percent ?? 0}
           unit="%"
           icon={<Flame className="w-5 h-5" />}
           description="DSS attribution"
@@ -132,15 +135,15 @@ export default function DashboardOverview() {
                 <div>
                   <p className="text-slate-400 text-sm mb-1">Predicted Category</p>
                   <AQIBadge 
-                    aqi={forecast.prediction.threshold} 
-                    category={forecast.prediction.aqi_category}
+                    aqi={forecast.prediction?.threshold ?? 0} 
+                    category={forecast.prediction?.aqi_category || 'Unknown'}
                     size="md"
                   />
                 </div>
                 <div>
                   <p className="text-slate-400 text-sm mb-1">Hours to Threshold</p>
                   <p className="text-2xl font-bold text-slate-50">
-                    {forecast.prediction.estimated_hours_to_threshold}h
+                    {forecast.prediction?.estimated_hours_to_threshold ?? 0}h
                   </p>
                 </div>
               </div>
@@ -156,7 +159,7 @@ export default function DashboardOverview() {
                 </button>
                 {expandedReasoning && (
                   <p className="mt-3 text-slate-300 text-sm leading-relaxed bg-slate-900/50 p-3 rounded">
-                    {forecast.reasoning}
+                    {forecast.reasoning || 'No reasoning available'}
                   </p>
                 )}
               </div>
@@ -166,7 +169,7 @@ export default function DashboardOverview() {
 
         {/* Confidence Meter */}
         <div className="flex flex-col items-center justify-center">
-          <ConfidenceMeter value={forecast.confidence_level} label="Prediction Confidence" />
+          <ConfidenceMeter value={forecast.confidence_level ?? 0} label="Prediction Confidence" />
         </div>
       </div>
 

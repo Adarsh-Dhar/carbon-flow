@@ -1,8 +1,15 @@
 from __future__ import annotations
 
 import os
+import sys
 import time
 from datetime import datetime, timezone
+from pathlib import Path
+
+# Add the forecast-agent directory to Python path for imports
+_forecast_agent_dir = Path(__file__).parent.parent
+if str(_forecast_agent_dir) not in sys.path:
+    sys.path.insert(0, str(_forecast_agent_dir))
 
 from crewai import Crew, Process
 

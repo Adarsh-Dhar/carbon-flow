@@ -22,6 +22,11 @@ def _with_debug_logs(tool_name: str, func: Callable[..., Any]) -> Callable[..., 
     """Wrap tool functions with debug logging for inputs and outputs."""
 
     def wrapper(*args: Any, **kwargs: Any) -> Any:
+        # Ensure TOOL_RESULT_CACHE is always a dict
+        global TOOL_RESULT_CACHE
+        if TOOL_RESULT_CACHE is None or not isinstance(TOOL_RESULT_CACHE, dict):
+            TOOL_RESULT_CACHE = {}
+        
         timestamp = datetime.utcnow().isoformat()
         debug_kwargs = dict(kwargs)
         security_context = debug_kwargs.pop("security_context", None)
@@ -29,19 +34,30 @@ def _with_debug_logs(tool_name: str, func: Callable[..., Any]) -> Callable[..., 
             f"[DEBUG {timestamp}] Tool `{tool_name}` invoked "
             f"with args={args} kwargs={debug_kwargs} security_context={security_context}"
         )
-        result = func(*args, **debug_kwargs)
-        TOOL_RESULT_CACHE[tool_name] = result
-        print(
-            f"[DEBUG {timestamp}] Tool `{tool_name}` completed "
-            f"with result_type={type(result).__name__}"
-        )
-        return result
+        try:
+            result = func(*args, **debug_kwargs)
+            # Only cache if result is not None
+            if result is not None:
+                TOOL_RESULT_CACHE[tool_name] = result
+            print(
+                f"[DEBUG {timestamp}] Tool `{tool_name}` completed "
+                f"with result_type={type(result).__name__}"
+            )
+            return result
+        except Exception as e:  # noqa: BLE001
+            print(f"[ERROR {timestamp}] Tool `{tool_name}` failed: {e}")
+            raise
 
     return wrapper
 
 
 def normalize_and_merge_from_cache() -> Any:
     """Normalize and merge using the latest cached DataFrames from previous tools."""
+    # Ensure TOOL_RESULT_CACHE is always a dict
+    global TOOL_RESULT_CACHE
+    if TOOL_RESULT_CACHE is None or not isinstance(TOOL_RESULT_CACHE, dict):
+        TOOL_RESULT_CACHE = {}
+    
     cpcb_df = TOOL_RESULT_CACHE.get("Fetch CPCB data")
     nasa_df = TOOL_RESULT_CACHE.get("Fetch NASA fire data")
     dss_df = TOOL_RESULT_CACHE.get("Fetch DSS pollution data")
@@ -61,13 +77,23 @@ def normalize_and_merge_from_cache() -> Any:
             f"Missing results from: {', '.join(missing)}"
         )
 
-    consolidated = storage_tools.normalize_and_merge(cpcb_df, nasa_df, dss_df)
-    TOOL_RESULT_CACHE["Normalize and merge data"] = consolidated
-    return consolidated
+    try:
+        consolidated = storage_tools.normalize_and_merge(cpcb_df, nasa_df, dss_df)
+        if consolidated is not None:
+            TOOL_RESULT_CACHE["Normalize and merge data"] = consolidated
+        return consolidated
+    except Exception as e:  # noqa: BLE001
+        print(f"[ERROR] normalize_and_merge failed: {e}")
+        raise
 
 
 def save_latest_to_s3_from_cache() -> Any:
     """Save the most recent consolidated DataFrame to S3."""
+    # Ensure TOOL_RESULT_CACHE is always a dict
+    global TOOL_RESULT_CACHE
+    if TOOL_RESULT_CACHE is None or not isinstance(TOOL_RESULT_CACHE, dict):
+        TOOL_RESULT_CACHE = {}
+    
     consolidated_df = TOOL_RESULT_CACHE.get("Normalize and merge data")
     if consolidated_df is None:
         raise ValueError(

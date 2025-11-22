@@ -205,18 +205,32 @@ def synthesize_and_predict_from_cache() -> Any:
             "Run 'Read ingested data from S3' first."
         )
     
+    # Ensure sensor_data is a dict
+    if not isinstance(sensor_data, dict):
+        raise ValueError(
+            f"Invalid sensor data type: {type(sensor_data)}. Expected dict."
+        )
+    
     # Meteo data is optional - prediction can proceed with reduced confidence
     if meteo_data is None:
         print("[DEBUG] Meteorological data not available, proceeding with reduced confidence")
+        meteo_data = {"error": "Meteorological data not available"}
+    elif not isinstance(meteo_data, dict):
+        print("[DEBUG] Meteorological data has invalid type, proceeding with reduced confidence")
         meteo_data = {"error": "Meteorological data not available"}
     
     try:
         result = prediction_tools.synthesize_and_predict(sensor_data, meteo_data)
         if result is not None:
+            # Ensure TOOL_RESULT_CACHE is still valid before caching
+            if TOOL_RESULT_CACHE is None or not isinstance(TOOL_RESULT_CACHE, dict):
+                TOOL_RESULT_CACHE = {}
             TOOL_RESULT_CACHE["Synthesize and predict"] = result
         return result
     except Exception as e:  # noqa: BLE001
         print(f"[ERROR] synthesize_and_predict failed: {e}")
+        import traceback
+        print(f"[ERROR] Traceback: {traceback.format_exc()}")
         raise
 
 

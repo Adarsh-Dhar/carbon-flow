@@ -57,6 +57,13 @@ def synthesize_and_predict(
     """
     print(f"[DEBUG {datetime.now().isoformat()}] synthesize_and_predict invoked")
     
+    # Check for None or invalid input data
+    if sensor_data is None or not isinstance(sensor_data, dict):
+        return {
+            "error": "Cannot generate prediction with invalid sensor data",
+            "details": "Sensor data is None or not a dictionary"
+        }
+    
     # Check for errors in input data
     if "error" in sensor_data:
         return {
@@ -64,7 +71,8 @@ def synthesize_and_predict(
             "details": f"Sensor data error: {sensor_data.get('error')}"
         }
     
-    if "error" in meteo_data:
+    # Handle meteo_data safely
+    if meteo_data is not None and isinstance(meteo_data, dict) and "error" in meteo_data:
         # We can still make predictions without meteo data, but with reduced confidence
         print("[DEBUG] Meteorological data unavailable, proceeding with reduced confidence")
         meteo_data = None
@@ -74,6 +82,14 @@ def synthesize_and_predict(
     nasa_data = sensor_data.get("nasa_data") if sensor_data else None
     dss_data = sensor_data.get("dss_data") if sensor_data else None
     data_quality = sensor_data.get("data_quality", {}) if sensor_data else {}
+    
+    # Ensure data_quality is always a dict
+    if not isinstance(data_quality, dict):
+        data_quality = {}
+    
+    # Ensure data_quality is always a dict
+    if not isinstance(data_quality, dict):
+        data_quality = {}
     
     # Extract key metrics with safe None handling
     current_aqi = None
