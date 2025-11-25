@@ -8,18 +8,11 @@ import type { ForecastHistoryEntry } from "@/lib/types"
 interface TrendsChartsProps {
   data: ForecastHistoryEntry[] | undefined
   isLoading: boolean
+  hasError?: boolean
 }
 
-// Mock data for demonstration
-const mockData: ForecastHistoryEntry[] = Array.from({ length: 7 }, (_, i) => ({
-  timestamp: new Date(Date.now() - (6 - i) * 24 * 60 * 60 * 1000).toISOString(),
-  aqi: 150 + Math.floor(Math.random() * 150),
-  fire_count: 20 + Math.floor(Math.random() * 80),
-  stubble_percent: 10 + Math.floor(Math.random() * 25),
-}))
-
-export function TrendsCharts({ data, isLoading }: TrendsChartsProps) {
-  const chartData = data?.length ? data : mockData
+export function TrendsCharts({ data, isLoading, hasError = false }: TrendsChartsProps) {
+  const chartData = data ?? []
 
   const formattedData = chartData.map((d) => ({
     ...d,
@@ -36,6 +29,27 @@ export function TrendsCharts({ data, isLoading }: TrendsChartsProps) {
           </Card>
         ))}
       </div>
+    )
+  }
+
+  if (hasError) {
+    return (
+      <Card className="glass-card p-8 text-center">
+        <h3 className="text-lg font-semibold text-foreground mb-2">Trend history unavailable</h3>
+        <p className="text-sm text-destructive font-semibold">ERR</p>
+      </Card>
+    )
+  }
+
+  if (!isLoading && chartData.length === 0) {
+    return (
+      <Card className="glass-card p-8 text-center">
+        <h3 className="text-lg font-semibold text-foreground mb-2">No trend data available</h3>
+        <p className="text-sm text-muted-foreground">
+          Historical forecasts are required to render these charts. Once the forecast agent runs multiple cycles, trends
+          will appear automatically.
+        </p>
+      </Card>
     )
   }
 

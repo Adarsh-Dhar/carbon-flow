@@ -14,10 +14,11 @@ interface SensorMapProps {
   sensors: SensorData | undefined
   forecast: ForecastLatest | undefined
   isLoading: boolean
+  hasError?: boolean
 }
 
 // Simulated map component (Leaflet would be used in production)
-export function SensorMap({ sensors, forecast, isLoading }: SensorMapProps) {
+export function SensorMap({ sensors, forecast, isLoading, hasError = false }: SensorMapProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
 
@@ -47,12 +48,26 @@ export function SensorMap({ sensors, forecast, isLoading }: SensorMapProps) {
       return true
     }) || []
 
-  const avgAQI = sensors?.cpcb_data?.length
-    ? Math.round(sensors.cpcb_data.reduce((acc, s) => acc + s.aqi, 0) / sensors.cpcb_data.length)
-    : 0
+  const hasStations = Boolean(filteredStations.length)
+  const hasFires = Boolean(sensors?.nasa_data?.length)
 
-  const windDirection = forecast?.prediction?.data_sources?.avg_wind_direction_24h_deg || 0
-  const windSpeed = forecast?.prediction?.data_sources?.avg_wind_speed_24h_kmh || 0
+  const avgAQI =
+    sensors?.cpcb_data?.length && hasStations
+      ? Math.round(sensors.cpcb_data.reduce((acc, s) => acc + s.aqi, 0) / sensors.cpcb_data.length)
+      : null
+  const avgAQIColor = avgAQI !== null ? getAQIColor(avgAQI) : "#94a3b8"
+
+  const windDirection = forecast?.prediction?.data_sources?.avg_wind_direction_24h_deg
+  const windSpeed = forecast?.prediction?.data_sources?.avg_wind_speed_24h_kmh
+
+  if (!isLoading && (hasError || (!hasStations && !hasFires))) {
+    return (
+      <Card className="glass-card p-8 mb-6 text-center">
+        <h3 className="text-lg font-semibold text-foreground mb-2">Sensor feed error</h3>
+        <p className="text-sm text-muted-foreground">{hasError ? "ERR" : "No telemetry available."}</p>
+      </Card>
+    )
+  }
 
   return (
     <div className="mb-6">
@@ -185,13 +200,15 @@ export function SensorMap({ sensors, forecast, isLoading }: SensorMapProps) {
             })}
 
           {/* Wind Arrow */}
-          <div
-            className="absolute bottom-6 right-6 flex items-center gap-2 glass rounded-lg px-4 py-2"
-            style={{ transform: `rotate(${windDirection}deg)` }}
-          >
-            <Wind className="h-5 w-5 text-primary" />
-            <span className="text-sm font-medium text-foreground">{windSpeed.toFixed(1)} km/h</span>
-          </div>
+          {windDirection !== undefined && windSpeed !== undefined && (
+            <div
+              className="absolute bottom-6 right-6 flex items-center gap-2 glass rounded-lg px-4 py-2"
+              style={{ transform: `rotate(${windDirection}deg)` }}
+            >
+              <Wind className="h-5 w-5 text-primary" />
+              <span className="text-sm font-medium text-foreground">{windSpeed.toFixed(1)} km/h</span>
+            </div>
+          )}
         </div>
 
         {/* Legend */}
@@ -234,8 +251,8 @@ export function SensorMap({ sensors, forecast, isLoading }: SensorMapProps) {
         <div className="flex items-center gap-2">
           <Badge variant="outline" className="text-xs">
             Avg AQI:{" "}
-            <span className="font-semibold ml-1" style={{ color: getAQIColor(avgAQI) }}>
-              {avgAQI}
+            <span className="font-semibold ml-1" style={{ color: avgAQIColor }}>
+              {avgAQI ?? "--"}
             </span>
           </Badge>
         </div>

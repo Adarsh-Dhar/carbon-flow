@@ -55,7 +55,7 @@ def _generate_mock_cpcb_data() -> pd.DataFrame:
         {"name": "Alipur", "lat": 28.8, "lon": 77.1, "aqi": 380, "is_border": True},
         {"name": "Anand Vihar", "lat": 28.65, "lon": 77.32, "aqi": 420, "is_border": True, "is_hotspot": True},
         {"name": "Dwarka", "lat": 28.59, "lon": 77.05, "aqi": 350, "is_border": True},
-        {"name": "Rohini", "lat": 28.74, "lon": 77.12, "aqi": 340, "is_border": True},
+        {"name": "Rohini", "lat": 28.74, "lon": 77.12, "aqi": 320, "is_border": True},
         {"name": "Bawana", "lat": 28.8, "lon": 77.05, "aqi": 410, "is_hotspot": True},
         {"name": "Mundka", "lat": 28.68, "lon": 77.03, "aqi": 395, "is_hotspot": True},
         {"name": "Punjabi Bagh", "lat": 28.67, "lon": 77.12, "aqi": 360, "is_hotspot": False},

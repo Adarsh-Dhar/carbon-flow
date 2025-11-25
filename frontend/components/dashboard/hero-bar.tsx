@@ -10,10 +10,11 @@ import type { OrchestratorStatus } from "@/lib/types"
 interface HeroBarProps {
   status: OrchestratorStatus | undefined
   isLoading: boolean
+  hasError?: boolean
   onEnforcementClick: () => void
 }
 
-export function HeroBar({ status, isLoading, onEnforcementClick }: HeroBarProps) {
+export function HeroBar({ status, isLoading, hasError = false, onEnforcementClick }: HeroBarProps) {
   const forecastAction = useAgentAction({
     actionFn: runForecastCycle,
     queryKeysToInvalidate: ["forecast", "sensors", "status"],
@@ -56,9 +57,15 @@ export function HeroBar({ status, isLoading, onEnforcementClick }: HeroBarProps)
             <p className="text-muted-foreground text-sm">Autonomous Air Quality Governance</p>
           </div>
           <Badge
-            className={`${status ? statusColor[status.status] : "bg-muted text-muted-foreground"} uppercase text-xs font-semibold px-3 py-1`}
+            className={`${
+              hasError
+                ? "bg-destructive text-destructive-foreground"
+                : status
+                  ? statusColor[status.status]
+                  : "bg-muted text-muted-foreground"
+            } uppercase text-xs font-semibold px-3 py-1`}
           >
-            {isLoading ? "Loading..." : status?.status || "Unknown"}
+            {hasError ? "ERR" : isLoading ? "Loading..." : status?.status || "Unknown"}
           </Badge>
         </div>
 
@@ -67,13 +74,15 @@ export function HeroBar({ status, isLoading, onEnforcementClick }: HeroBarProps)
           <div className="flex items-center gap-2 text-muted-foreground">
             <Clock className="h-4 w-4" />
             <span>Last cycle: </span>
-            <span className="text-foreground font-medium">{isLoading ? "..." : formatLastRun(status?.last_run)}</span>
+            <span className="text-foreground font-medium">
+              {hasError ? "ERR" : isLoading ? "..." : formatLastRun(status?.last_run)}
+            </span>
           </div>
           <div className="flex items-center gap-2 text-muted-foreground">
             <Timer className="h-4 w-4" />
             <span>Duration: </span>
             <span className="text-foreground font-medium">
-              {isLoading ? "..." : formatDuration(status?.cycle_duration_seconds || 0)}
+              {hasError ? "ERR" : isLoading ? "..." : formatDuration(status?.cycle_duration_seconds || 0)}
             </span>
           </div>
         </div>
@@ -84,7 +93,7 @@ export function HeroBar({ status, isLoading, onEnforcementClick }: HeroBarProps)
             variant="outline"
             size="sm"
             onClick={() => forecastAction.execute()}
-            disabled={forecastAction.isLoading}
+            disabled={forecastAction.isLoading || hasError}
             className="gap-2"
           >
             {forecastAction.isLoading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
@@ -103,7 +112,7 @@ export function HeroBar({ status, isLoading, onEnforcementClick }: HeroBarProps)
             variant="outline"
             size="sm"
             onClick={() => accountabilityAction.execute()}
-            disabled={accountabilityAction.isLoading}
+            disabled={accountabilityAction.isLoading || hasError}
             className="gap-2"
           >
             {accountabilityAction.isLoading ? (

@@ -26,7 +26,13 @@ import {
 } from "lucide-react"
 import { useAgentAction } from "@/hooks/use-agent-action"
 import { runForecastCycle, runAccountability, downloadAccountabilityPDF } from "@/lib/api"
-import type { ForecastLatest, AgentHistory, ForecastHistoryEntry, AccountabilityReport } from "@/lib/types"
+import type {
+  ForecastLatest,
+  AgentHistory,
+  AgentHistoryEntry,
+  ForecastHistoryEntry,
+  AccountabilityReport,
+} from "@/lib/types"
 import { TrendsCharts } from "./trends-charts"
 import { ActivityLog } from "./activity-log"
 
@@ -35,12 +41,39 @@ interface AgentTabsProps {
   history: AgentHistory | undefined
   trendData: ForecastHistoryEntry[] | undefined
   isLoading: boolean
+  forecastError?: boolean
+  historyError?: boolean
+  trendsError?: boolean
   onEnforcementClick: () => void
 }
 
-export function AgentTabs({ forecast, history, trendData, isLoading, onEnforcementClick }: AgentTabsProps) {
+export function AgentTabs({
+  forecast,
+  history,
+  trendData,
+  isLoading,
+  forecastError = false,
+  historyError = false,
+  trendsError = false,
+  onEnforcementClick,
+}: AgentTabsProps) {
   const [jsonExpanded, setJsonExpanded] = useState(false)
   const [accountabilityReport, setAccountabilityReport] = useState<AccountabilityReport | null>(null)
+
+  const enforcementHistory = history?.enforcement ?? []
+
+  const getBadgeClass = (status: AgentHistoryEntry["status"]) => {
+    switch (status) {
+      case "success":
+        return "bg-success/20 text-success"
+      case "failure":
+        return "bg-destructive/20 text-destructive"
+      case "running":
+        return "bg-primary/20 text-primary"
+      default:
+        return "bg-muted text-muted-foreground"
+    }
+  }
 
   const forecastAction = useAgentAction({
     actionFn: runForecastCycle,
@@ -150,7 +183,7 @@ export function AgentTabs({ forecast, history, trendData, isLoading, onEnforceme
                 <Skeleton className="h-4 w-3/4" />
                 <Skeleton className="h-4 w-1/2" />
               </div>
-            ) : forecast?.prediction ? (
+            ) : forecast?.prediction && !forecastError ? (
               <div className="space-y-3">
                 <div className="flex items-center gap-3">
                   <Badge className="bg-orange text-white">{forecast.prediction.aqi_category}</Badge>
@@ -168,7 +201,7 @@ export function AgentTabs({ forecast, history, trendData, isLoading, onEnforceme
                 </div>
               </div>
             ) : (
-              <p className="text-sm text-muted-foreground">No forecast data available</p>
+              <p className="text-sm text-destructive font-semibold">ERR</p>
             )}
           </Card>
         </div>
@@ -220,23 +253,27 @@ export function AgentTabs({ forecast, history, trendData, isLoading, onEnforceme
           <Card className="glass-card p-5">
             <h3 className="font-semibold text-foreground mb-3">Action Log</h3>
             <div className="space-y-3">
-              {[
-                { type: "Construction Bans", status: "pending" },
-                { type: "Vehicle Restrictions", status: "pending" },
-                { type: "School Advisory", status: "pending" },
-                { type: "Enforcement Teams", status: "pending" },
-              ].map((action) => (
-                <div
-                  key={action.type}
-                  className="flex items-center justify-between py-2 border-b border-border last:border-0"
-                >
-                  <span className="text-sm text-foreground">{action.type}</span>
-                  <Badge variant="outline" className="text-muted-foreground">
-                    <Clock className="h-3 w-3 mr-1" />
-                    {action.status}
-                  </Badge>
-                </div>
-              ))}
+              {historyError ? (
+                <p className="text-sm text-destructive font-semibold">ERR</p>
+              ) : enforcementHistory.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No enforcement activity recorded yet.</p>
+              ) : (
+                enforcementHistory.map((entry, idx) => (
+                  <div
+                    key={`${entry.timestamp}-${idx}`}
+                    className="flex items-center justify-between py-2 border-b border-border last:border-0"
+                  >
+                    <div>
+                      <p className="text-sm text-foreground capitalize">{entry.status}</p>
+                      <p className="text-xs text-muted-foreground">{entry.message}</p>
+                    </div>
+                    <Badge className={getBadgeClass(entry.status)}>
+                      <Clock className="h-3 w-3 mr-1" />
+                      {new Date(entry.timestamp).toLocaleTimeString()}
+                    </Badge>
+                  </div>
+                ))
+              )}
             </div>
           </Card>
         </div>
@@ -325,12 +362,12 @@ export function AgentTabs({ forecast, history, trendData, isLoading, onEnforceme
 
       {/* Trends Tab */}
       <TabsContent value="trends" className="mt-4">
-        <TrendsCharts data={trendData} isLoading={isLoading} />
+        <TrendsCharts data={trendData} isLoading={isLoading} hasError={trendsError} />
       </TabsContent>
 
       {/* Activity Log Tab */}
       <TabsContent value="activity" className="mt-4">
-        <ActivityLog history={history} isLoading={isLoading} />
+        <ActivityLog history={history} isLoading={isLoading} hasError={historyError} />
       </TabsContent>
 
       {/* Advanced Visualizations Tab */}

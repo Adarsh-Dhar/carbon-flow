@@ -26,6 +26,7 @@ import type { OrchestratorStatus } from "@/lib/types"
 interface RightSidebarProps {
   status: OrchestratorStatus | undefined
   isLoading: boolean
+  hasError?: boolean
 }
 
 const agents = [
@@ -43,7 +44,7 @@ const intervalOptions: { value: RefreshInterval; label: string }[] = [
   { value: 300, label: "5m" },
 ]
 
-export function RightSidebar({ status, isLoading }: RightSidebarProps) {
+export function RightSidebar({ status, isLoading, hasError = false }: RightSidebarProps) {
   const [collapsed, setCollapsed] = useState(false)
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [interval, setInterval] = useState<RefreshInterval>(30)
@@ -92,7 +93,7 @@ export function RightSidebar({ status, isLoading }: RightSidebarProps) {
         </h3>
         <div className="space-y-2">
           {agents.map((agent) => {
-            const agentStatus = status?.agents?.[agent.key]
+            const agentStatus = hasError ? undefined : status?.agents?.[agent.key]
             const isAvailable = agentStatus?.status === "available"
 
             return (
@@ -104,14 +105,20 @@ export function RightSidebar({ status, isLoading }: RightSidebarProps) {
                   </div>
                   <Badge
                     variant="outline"
-                    className={isAvailable ? "text-success border-success" : "text-muted-foreground"}
+                    className={
+                      hasError
+                        ? "text-destructive border-destructive"
+                        : isAvailable
+                          ? "text-success border-success"
+                          : "text-muted-foreground"
+                    }
                   >
-                    {isAvailable ? <CheckCircle2 className="h-3 w-3 mr-1" /> : <XCircle className="h-3 w-3 mr-1" />}
-                    {isAvailable ? "Available" : "Unavailable"}
+                    {hasError ? <XCircle className="h-3 w-3 mr-1" /> : isAvailable ? <CheckCircle2 className="h-3 w-3 mr-1" /> : <XCircle className="h-3 w-3 mr-1" />}
+                    {hasError ? "ERR" : isAvailable ? "Available" : "Unavailable"}
                   </Badge>
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Last run: {formatLastRun(agentStatus?.last_run || null)}
+                  Last run: {hasError ? "ERR" : formatLastRun(agentStatus?.last_run || null)}
                 </p>
               </Card>
             )
@@ -160,44 +167,42 @@ export function RightSidebar({ status, isLoading }: RightSidebarProps) {
       <Card className="glass-card p-4 mb-6">
         <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Data Freshness</h3>
         <div className="space-y-2 text-sm">
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">Forecast</span>
-            <Badge variant="outline" className="text-xs">
-              <Clock className="h-3 w-3 mr-1" />
-              5m ago
-            </Badge>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">Sensors</span>
-            <Badge variant="outline" className="text-xs">
-              <Clock className="h-3 w-3 mr-1" />
-              2m ago
-            </Badge>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">Station Count</span>
-            <span className="text-foreground font-medium">42</span>
-          </div>
+          {[
+            { label: "Forecast", timestamp: status?.agents?.forecast?.last_run || null },
+            { label: "Sensors", timestamp: status?.agents?.sensor_ingest?.last_run || null },
+            { label: "Accountability", timestamp: status?.agents?.accountability?.last_run || null },
+          ].map((item) => (
+            <div key={item.label} className="flex items-center justify-between">
+              <span className="text-muted-foreground">{item.label}</span>
+              <Badge variant="outline" className="text-xs">
+                <Clock className="h-3 w-3 mr-1" />
+                {hasError ? "ERR" : item.timestamp ? formatLastRun(item.timestamp) : "No data"}
+              </Badge>
+            </div>
+          ))}
         </div>
       </Card>
 
       {/* Recent Report */}
       <Card className="glass-card p-4 mb-6">
         <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Latest Report</h3>
-        <div className="space-y-2 text-sm">
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">ID</span>
-            <span className="font-mono text-foreground text-xs">ACC-2024-1142</span>
+        {hasError ? (
+          <p className="text-sm text-destructive font-semibold">ERR</p>
+        ) : status?.agents?.accountability?.last_run ? (
+          <div className="space-y-2 text-sm">
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Last generated</span>
+              <span className="text-foreground">
+                {new Date(status.agents.accountability.last_run).toLocaleString()}
+              </span>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Download the latest accountability PDF from the Accountability tab.
+            </p>
           </div>
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">Generated</span>
-            <span className="text-foreground">Today, 14:32</span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">Confidence</span>
-            <span className="text-success font-medium">87%</span>
-          </div>
-        </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">No accountability reports have been generated yet.</p>
+        )}
       </Card>
 
       {/* Notifications Placeholder */}

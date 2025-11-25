@@ -9,6 +9,7 @@ import type { AgentHistory, AgentHistoryEntry } from "@/lib/types"
 interface ActivityLogProps {
   history: AgentHistory | undefined
   isLoading: boolean
+  hasError?: boolean
 }
 
 const agentIcons = {
@@ -32,50 +33,15 @@ const statusConfig = {
   pending: { icon: Clock, className: "text-muted-foreground", badge: "bg-muted text-muted-foreground" },
 }
 
-// Mock data for demonstration
-const mockHistory: AgentHistory = {
-  sensor_ingest: [
-    {
-      timestamp: new Date(Date.now() - 5 * 60000).toISOString(),
-      status: "success",
-      message: "Ingested 42 CPCB stations",
-    },
-    {
-      timestamp: new Date(Date.now() - 35 * 60000).toISOString(),
-      status: "success",
-      message: "NASA FIRMS data updated",
-    },
-  ],
-  forecast: [
-    {
-      timestamp: new Date(Date.now() - 10 * 60000).toISOString(),
-      status: "success",
-      message: "Predicted: Very Poor (86% confidence)",
-    },
-    {
-      timestamp: new Date(Date.now() - 70 * 60000).toISOString(),
-      status: "success",
-      message: "Predicted: Poor (92% confidence)",
-    },
-  ],
-  enforcement: [
-    {
-      timestamp: new Date(Date.now() - 120 * 60000).toISOString(),
-      status: "pending",
-      message: "Awaiting authorization",
-    },
-  ],
-  accountability: [
-    {
-      timestamp: new Date(Date.now() - 180 * 60000).toISOString(),
-      status: "success",
-      message: "Report #ACC-2024-1142 generated",
-    },
-  ],
-}
-
-export function ActivityLog({ history, isLoading }: ActivityLogProps) {
-  const data = history || mockHistory
+export function ActivityLog({ history, isLoading, hasError = false }: ActivityLogProps) {
+  if (hasError) {
+    return (
+      <Card className="glass-card p-8 text-center">
+        <h3 className="font-semibold text-foreground mb-2">Agent history unavailable</h3>
+        <p className="text-sm text-destructive font-semibold">ERR</p>
+      </Card>
+    )
+  }
 
   if (isLoading) {
     return (
@@ -94,12 +60,13 @@ export function ActivityLog({ history, isLoading }: ActivityLogProps) {
   }
 
   const allEntries: { agent: keyof AgentHistory; entry: AgentHistoryEntry }[] = []
-
-  Object.entries(data).forEach(([agent, entries]) => {
-    entries.forEach((entry) => {
-      allEntries.push({ agent: agent as keyof AgentHistory, entry })
+  if (history) {
+    Object.entries(history).forEach(([agent, entries]) => {
+      entries.forEach((entry) => {
+        allEntries.push({ agent: agent as keyof AgentHistory, entry })
+      })
     })
-  })
+  }
 
   // Sort by timestamp descending
   allEntries.sort((a, b) => new Date(b.entry.timestamp).getTime() - new Date(a.entry.timestamp).getTime())
