@@ -8,9 +8,31 @@ using haversine distance calculations and time window filtering.
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from math import atan2, cos, radians, sin, sqrt
 from typing import Any
 
-from haversine import haversine
+try:
+    from haversine import haversine as _haversine_impl
+except ImportError:
+    def _haversine_impl(point1: tuple[float, float], point2: tuple[float, float]) -> float:
+        """
+        Lightweight fallback haversine implementation if dependency is unavailable.
+        """
+        lat1, lon1 = point1
+        lat2, lon2 = point2
+        rlat1 = radians(lat1)
+        rlon1 = radians(lon1)
+        rlat2 = radians(lat2)
+        rlon2 = radians(lon2)
+        dlat = rlat2 - rlat1
+        dlon = rlon2 - rlon1
+        a = (
+            sin(dlat / 2) ** 2
+            + cos(rlat1) * cos(rlat2) * sin(dlon / 2) ** 2
+        )
+        c = 2 * atan2(sqrt(a), sqrt(1 - a))
+        earth_radius_km = 6371.0
+        return earth_radius_km * c
 
 from src.config.thresholds import (
     CORRELATION_WINDOW_HOURS,
@@ -52,7 +74,7 @@ def haversine_distance_km(
     Returns:
         Distance in kilometers
     """
-    return haversine((lat1, lon1), (lat2, lon2))
+    return _haversine_impl((lat1, lon1), (lat2, lon2))
 
 
 def parse_fire_timestamp(fire_data: dict[str, Any]) -> datetime | None:

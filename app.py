@@ -381,8 +381,147 @@ def remove_agent_dirs_from_path():
 # Import forecast agent crews
 remove_agent_dirs_from_path()
 sys.path.insert(0, str(forecast_agent_dir))
+run_forecast_cycle = None
+
+# Clear any cached src modules to avoid conflicts
+modules_to_remove = [
+    mod for mod in list(sys.modules.keys())
+    if mod == "src" or mod.startswith("src.")
+]
+for mod in modules_to_remove:
+    if mod in sys.modules:
+        del sys.modules[mod]
 
 try:
+    # Set up src package FIRST (parent of src.utils and src.tools)
+    if "src" not in sys.modules:
+        src_module = type(sys)("src")
+        sys.modules["src"] = src_module
+    else:
+        src_module = sys.modules["src"]
+    src_module.__package__ = "src"
+    src_module.__path__ = [str(forecast_agent_dir / "src")]
+    
+    # Set up src.utils package BEFORE loading tools (tools import from it)
+    if "src.utils" not in sys.modules:
+        utils_module = type(sys)("src.utils")
+        sys.modules["src.utils"] = utils_module
+    else:
+        utils_module = sys.modules["src.utils"]
+    utils_module.__package__ = "src.utils"
+    utils_module.__path__ = [str(forecast_agent_dir / "src" / "utils")]
+    setattr(sys.modules["src"], "utils", utils_module)
+    
+    # Load utils modules that tools depend on
+    utils_modules = ["api_helpers", "env_config"]
+    for util_name in utils_modules:
+        util_path = forecast_agent_dir / "src" / "utils" / f"{util_name}.py"
+        if util_path.exists():
+            util_spec = importlib.util.spec_from_file_location(
+                f"src.utils.{util_name}", util_path
+            )
+            util_module = importlib.util.module_from_spec(util_spec)
+            util_module.__package__ = "src.utils"
+            sys.modules[f"src.utils.{util_name}"] = util_module
+            util_spec.loader.exec_module(util_module)
+            # Also register in src.utils namespace
+            setattr(sys.modules["src.utils"], util_name, util_module)
+    
+    # Load utils __init__.py if it exists
+    utils_init_path = forecast_agent_dir / "src" / "utils" / "__init__.py"
+    if utils_init_path.exists():
+        utils_init_spec = importlib.util.spec_from_file_location(
+            "src.utils", utils_init_path
+        )
+        utils_init = importlib.util.module_from_spec(utils_init_spec)
+        utils_init.__package__ = "src.utils"
+        utils_init.__path__ = [str(forecast_agent_dir / "src" / "utils")]
+        
+        # Preserve existing utils modules as attributes
+        existing_utils = sys.modules.get("src.utils")
+        if existing_utils:
+            for util_name in utils_modules:
+                if hasattr(existing_utils, util_name):
+                    setattr(utils_init, util_name, getattr(existing_utils, util_name))
+        
+        sys.modules["src.utils"] = utils_init
+        setattr(sys.modules["src"], "utils", utils_init)
+        utils_init_spec.loader.exec_module(utils_init)
+    
+    # Ensure src.tools package is set up for proper imports
+    if "src.tools" not in sys.modules:
+        tools_module = type(sys)("src.tools")
+        sys.modules["src.tools"] = tools_module
+    else:
+        tools_module = sys.modules["src.tools"]
+    tools_module.__package__ = "src.tools"
+    tools_module.__path__ = [str(forecast_agent_dir / "src" / "tools")]
+    setattr(sys.modules["src"], "tools", tools_module)
+    
+    # Load all tool modules BEFORE loading agents.py (which imports from them)
+    tool_modules = [
+        "cpcb_tools",
+        "nasa_tools",
+        "dss_tools",
+        "storage_tools",
+        "s3_reader_tools",
+        "meteo_tools",
+        "prediction_tools",
+        "output_tools",
+    ]
+    
+    for tool_name in tool_modules:
+        tool_path = forecast_agent_dir / "src" / "tools" / f"{tool_name}.py"
+        if tool_path.exists():
+            tool_spec = importlib.util.spec_from_file_location(
+                f"src.tools.{tool_name}", tool_path
+            )
+            tool_module = importlib.util.module_from_spec(tool_spec)
+            tool_module.__package__ = "src.tools"
+            sys.modules[f"src.tools.{tool_name}"] = tool_module
+            tool_spec.loader.exec_module(tool_module)
+            # Also register in src.tools namespace
+            setattr(sys.modules["src.tools"], tool_name, tool_module)
+    
+    # Load tools __init__.py to set up exports
+    tools_init_path = forecast_agent_dir / "src" / "tools" / "__init__.py"
+    if tools_init_path.exists():
+        tools_module = sys.modules["src.tools"]
+        tools_init_spec = importlib.util.spec_from_file_location(
+            "src.tools", tools_init_path
+        )
+        tools_module.__spec__ = tools_init_spec
+        tools_module.__loader__ = tools_init_spec.loader
+        tools_module.__package__ = "src.tools"
+        tools_module.__path__ = [str(forecast_agent_dir / "src" / "tools")]
+        tools_init_spec.loader.exec_module(tools_module)
+        setattr(sys.modules["src"], "tools", tools_module)
+        
+        # Ensure tool modules remain registered as attributes after __init__ runs
+        for tool_name in tool_modules:
+            module_key = f"src.tools.{tool_name}"
+            if module_key in sys.modules:
+                setattr(tools_module, tool_name, sys.modules[module_key])
+    
+    # Register src.agents module before loading main.py (which imports from it)
+    if "src.agents" not in sys.modules:
+        agents_module = type(sys)("src.agents")
+        agents_module.__package__ = "src"
+        sys.modules["src.agents"] = agents_module
+        setattr(sys.modules["src"], "agents", agents_module)
+    
+    # Load agents.py first so main.py can import from it
+    forecast_agents_path = forecast_agent_dir / "src" / "agents.py"
+    forecast_agents_spec = importlib.util.spec_from_file_location(
+        "src.agents", forecast_agents_path
+    )
+    forecast_agents = importlib.util.module_from_spec(forecast_agents_spec)
+    # Register module under both src.agents and forecast_agents for compatibility
+    sys.modules["src.agents"] = forecast_agents
+    sys.modules["forecast_agents"] = forecast_agents
+    forecast_agents_spec.loader.exec_module(forecast_agents)
+    setattr(sys.modules["src"], "agents", forecast_agents)
+    
     forecast_main_path = forecast_agent_dir / "src" / "main.py"
     forecast_main_spec = importlib.util.spec_from_file_location(
         "forecast_main", forecast_main_path
@@ -393,10 +532,12 @@ try:
     
     sensor_crew = forecast_main.sensor_crew
     forecast_crew = forecast_main.forecast_crew
+    run_forecast_cycle = getattr(forecast_main, "run_forecast_cycle", None)
 except Exception as e:
     st.error(f"Failed to load forecast agents: {e}")
     sensor_crew = None
     forecast_crew = None
+    run_forecast_cycle = None
 
 sys.path = original_sys_path.copy()
 
@@ -404,12 +545,104 @@ sys.path = original_sys_path.copy()
 remove_agent_dirs_from_path()
 sys.path.insert(0, str(enforcement_agent_dir))
 
-modules_to_remove = [mod for mod in sys.modules.keys() if mod.startswith('src.')]
+modules_to_remove = [
+    mod for mod in list(sys.modules.keys())
+    if mod == "src" or mod.startswith("src.")
+]
 for mod in modules_to_remove:
     if mod in sys.modules:
         del sys.modules[mod]
 
 try:
+    # Set up src package root for enforcement agent
+    if "src" not in sys.modules:
+        src_module = type(sys)("src")
+        sys.modules["src"] = src_module
+    else:
+        src_module = sys.modules["src"]
+    src_module.__package__ = "src"
+    src_module.__path__ = [str(enforcement_agent_dir / "src")]
+    
+    # Set up src.tools package for proper imports
+    if "src.tools" not in sys.modules:
+        tools_module = type(sys)("src.tools")
+        sys.modules["src.tools"] = tools_module
+    else:
+        tools_module = sys.modules["src.tools"]
+    tools_module.__package__ = "src.tools"
+    tools_module.__path__ = [str(enforcement_agent_dir / "src" / "tools")]
+    setattr(sys.modules["src"], "tools", tools_module)
+    
+    # Set up src.tools.api_adapters package (tool modules depend on it)
+    if "src.tools.api_adapters" not in sys.modules:
+        api_adapters_module = type(sys)("src.tools.api_adapters")
+        sys.modules["src.tools.api_adapters"] = api_adapters_module
+    else:
+        api_adapters_module = sys.modules["src.tools.api_adapters"]
+    api_adapters_module.__package__ = "src.tools.api_adapters"
+    api_adapters_module.__path__ = [
+        str(enforcement_agent_dir / "src" / "tools" / "api_adapters")
+    ]
+    setattr(sys.modules["src.tools"], "api_adapters", api_adapters_module)
+    
+    # Register api_adapter modules (load config first since others depend on it)
+    api_adapter_modules = [
+        "config",
+        "construction_api",
+        "enforcement_api",
+        "traffic_api",
+        "education_api",
+    ]
+    
+    for adapter_name in api_adapter_modules:
+        adapter_path = enforcement_agent_dir / "src" / "tools" / "api_adapters" / f"{adapter_name}.py"
+        if adapter_path.exists():
+            adapter_spec = importlib.util.spec_from_file_location(
+                f"src.tools.api_adapters.{adapter_name}", adapter_path
+            )
+            adapter_module = importlib.util.module_from_spec(adapter_spec)
+            adapter_module.__package__ = "src.tools.api_adapters"
+            sys.modules[f"src.tools.api_adapters.{adapter_name}"] = adapter_module
+            adapter_spec.loader.exec_module(adapter_module)
+            # Also register in src.tools.api_adapters namespace
+            setattr(sys.modules["src.tools.api_adapters"], adapter_name, adapter_module)
+    
+    # Load api_adapters/__init__.py after submodules are registered
+    api_adapters_init_path = enforcement_agent_dir / "src" / "tools" / "api_adapters" / "__init__.py"
+    if api_adapters_init_path.exists():
+        api_adapters_init_spec = importlib.util.spec_from_file_location(
+            "src.tools.api_adapters", api_adapters_init_path
+        )
+        api_adapters_module.__spec__ = api_adapters_init_spec
+        api_adapters_module.__loader__ = api_adapters_init_spec.loader
+        api_adapters_module.__package__ = "src.tools.api_adapters"
+        api_adapters_module.__path__ = [
+            str(enforcement_agent_dir / "src" / "tools" / "api_adapters")
+        ]
+        api_adapters_init_spec.loader.exec_module(api_adapters_module)
+        setattr(sys.modules["src.tools"], "api_adapters", api_adapters_module)
+    
+    # Register all tool modules before loading agents.py (which imports from them)
+    tool_modules = [
+        "enforcement_tools",
+        "restrict_vehicles",
+        "dispatch_enforcement_teams",
+        "notify_public",
+    ]
+    
+    for tool_name in tool_modules:
+        tool_path = enforcement_agent_dir / "src" / "tools" / f"{tool_name}.py"
+        if tool_path.exists():
+            tool_spec = importlib.util.spec_from_file_location(
+                f"src.tools.{tool_name}", tool_path
+            )
+            tool_module = importlib.util.module_from_spec(tool_spec)
+            tool_module.__package__ = "src.tools"
+            sys.modules[f"src.tools.{tool_name}"] = tool_module
+            tool_spec.loader.exec_module(tool_module)
+            # Also register in src.tools namespace
+            setattr(sys.modules["src.tools"], tool_name, tool_module)
+    
     enforcement_agents_spec = importlib.util.spec_from_file_location(
         "enforcement_agents", enforcement_agent_dir / "src" / "agents.py"
     )
@@ -436,32 +669,108 @@ sys.path = original_sys_path.copy()
 remove_agent_dirs_from_path()
 sys.path.insert(0, str(accountability_agent_dir))
 
-modules_to_remove = [mod for mod in list(sys.modules.keys()) if mod.startswith('src.')]
+modules_to_remove = [
+    mod for mod in list(sys.modules.keys())
+    if mod == "src" or mod.startswith("src.")
+]
 for mod in modules_to_remove:
     del sys.modules[mod]
 
 try:
-    # Load config modules first
+    # Set up src package root for accountability agent
+    if "src" not in sys.modules:
+        src_module = type(sys)("src")
+        sys.modules["src"] = src_module
+    else:
+        src_module = sys.modules["src"]
+    src_module.__package__ = "src"
+    src_module.__path__ = [str(accountability_agent_dir / "src")]
+    
+    # Set up src.config package for proper imports
+    if "src.config" not in sys.modules:
+        config_module = type(sys)("src.config")
+        config_module.__package__ = "src.config"
+        config_module.__path__ = [str(accountability_agent_dir / "src" / "config")]
+        sys.modules["src.config"] = config_module
+    else:
+        config_module = sys.modules["src.config"]
+    setattr(sys.modules["src"], "config", config_module)
+    
+    # Load config modules first and register with src.config.* path
     accountability_config_bs_spec = importlib.util.spec_from_file_location(
-        "accountability_config_bs", accountability_agent_dir / "src" / "config" / "border_stations.py"
+        "src.config.border_stations", accountability_agent_dir / "src" / "config" / "border_stations.py"
     )
     accountability_config_bs = importlib.util.module_from_spec(accountability_config_bs_spec)
     sys.modules["accountability_config_bs"] = accountability_config_bs
+    sys.modules["src.config.border_stations"] = accountability_config_bs
     accountability_config_bs_spec.loader.exec_module(accountability_config_bs)
+    # Also register in src.config namespace
+    setattr(sys.modules["src.config"], "border_stations", accountability_config_bs)
     
-    # Load tools module
-    accountability_tools_spec = importlib.util.spec_from_file_location(
-        "accountability_tools", accountability_agent_dir / "src" / "tools" / "accountability_tools.py"
+    accountability_config_thresh_spec = importlib.util.spec_from_file_location(
+        "src.config.thresholds", accountability_agent_dir / "src" / "config" / "thresholds.py"
     )
-    accountability_tools = importlib.util.module_from_spec(accountability_tools_spec)
-    sys.modules["src.tools.accountability_tools"] = accountability_tools
-    sys.modules["accountability_tools"] = accountability_tools
-    accountability_tools_spec.loader.exec_module(accountability_tools)
+    accountability_config_thresh = importlib.util.module_from_spec(accountability_config_thresh_spec)
+    sys.modules["accountability_config_thresh"] = accountability_config_thresh
+    sys.modules["src.config.thresholds"] = accountability_config_thresh
+    accountability_config_thresh_spec.loader.exec_module(accountability_config_thresh)
+    # Also register in src.config namespace
+    setattr(sys.modules["src.config"], "thresholds", accountability_config_thresh)
     
+    # Set up src.models package for proper imports
+    if "src.models" not in sys.modules:
+        models_module = type(sys)("src.models")
+        models_module.__package__ = "src.models"
+        models_module.__path__ = [str(accountability_agent_dir / "src" / "models")]
+        sys.modules["src.models"] = models_module
+    else:
+        models_module = sys.modules["src.models"]
+    setattr(sys.modules["src"], "models", models_module)
+    
+    # Load models module (tool modules depend on it)
+    accountability_models_spec = importlib.util.spec_from_file_location(
+        "src.models.data_models", accountability_agent_dir / "src" / "models" / "data_models.py"
+    )
+    accountability_models = importlib.util.module_from_spec(accountability_models_spec)
+    sys.modules["accountability_models"] = accountability_models
+    sys.modules["src.models.data_models"] = accountability_models
+    accountability_models_spec.loader.exec_module(accountability_models)
+    # Also register in src.models namespace
+    setattr(sys.modules["src.models"], "data_models", accountability_models)
+    
+    # Set up src.tools package for proper imports
     if "src.tools" not in sys.modules:
         tools_module = type(sys)("src.tools")
+        tools_module.__package__ = "src.tools"
+        tools_module.__path__ = [str(accountability_agent_dir / "src" / "tools")]
         sys.modules["src.tools"] = tools_module
-    sys.modules["src.tools"].accountability_tools = accountability_tools
+    else:
+        tools_module = sys.modules["src.tools"]
+    setattr(sys.modules["src"], "tools", tools_module)
+    
+    # Load tool modules in dependency order BEFORE loading accountability_tools.py
+    # Order: surge_detection_tools, correlation_tools, report_generation_tools, then accountability_tools
+    tool_modules = [
+        "surge_detection_tools",
+        "correlation_tools",
+        "report_generation_tools",
+        "accountability_tools",
+    ]
+    
+    for tool_name in tool_modules:
+        tool_path = accountability_agent_dir / "src" / "tools" / f"{tool_name}.py"
+        if tool_path.exists():
+            tool_spec = importlib.util.spec_from_file_location(
+                f"src.tools.{tool_name}", tool_path
+            )
+            tool_module = importlib.util.module_from_spec(tool_spec)
+            tool_module.__package__ = "src.tools"
+            sys.modules[f"src.tools.{tool_name}"] = tool_module
+            tool_spec.loader.exec_module(tool_module)
+            # Also register in src.tools namespace
+            setattr(sys.modules["src.tools"], tool_name, tool_module)
+    
+    accountability_tools = sys.modules["src.tools.accountability_tools"]
     
     if "src.agents" not in sys.modules:
         agents_module = type(sys)("src.agents")
@@ -523,6 +832,85 @@ def load_forecast_data() -> dict[str, Any] | None:
     except Exception as e:
         st.warning(f"Could not load forecast file: {e}")
         return None
+
+
+def render_forecast_run_status(
+    cycle_result: dict[str, Any] | None,
+    latest_forecast: dict[str, Any] | None
+) -> None:
+    """Render a friendly summary of the most recent manual forecast run."""
+    status_container = st.container()
+    if not cycle_result:
+        status_container.info("Trigger the forecast cycle to view fresh predictions.")
+        return
+
+    success = bool(cycle_result.get("success", False))
+    start_ts = cycle_result.get("start_timestamp")
+    result_payload = cycle_result.get("result")
+    error_msg = cycle_result.get("error")
+    details = cycle_result.get("details")
+
+    with status_container:
+        if success:
+            st.success("Forecast cycle completed successfully.")
+        else:
+            st.error(error_msg or "Forecast cycle failed.")
+        if start_ts:
+            st.caption(f"Triggered at {start_ts}")
+        if not success and details:
+            st.code(details, language="text")
+
+    summary_source: dict[str, Any] | None = None
+    if isinstance(result_payload, dict):
+        summary_source = result_payload
+    elif isinstance(latest_forecast, dict):
+        summary_source = latest_forecast
+
+    if summary_source:
+        prediction_payload = summary_source.get("prediction")
+        if isinstance(prediction_payload, dict):
+            prediction_bits = []
+            category = prediction_payload.get("aqi_category")
+            threshold = prediction_payload.get("threshold")
+            eta = prediction_payload.get("estimated_hours_to_threshold")
+            if category:
+                prediction_bits.append(category)
+            if threshold:
+                prediction_bits.append(f"threshold {threshold}")
+            if eta is not None:
+                prediction_bits.append(f"~{eta}h ETA")
+            if prediction_bits:
+                st.write(f"**Prediction:** {', '.join(prediction_bits)}")
+        elif prediction_payload:
+            st.write(f"**Prediction:** {prediction_payload}")
+
+        cols = st.columns(2)
+        confidence = summary_source.get("confidence_level")
+        if confidence is not None:
+            cols[0].metric("Confidence", f"{float(confidence):.1f}%")
+
+        fire_count = summary_source.get("fire_count") or summary_source.get("data_sources", {}).get("nasa_fire_count")
+        if fire_count is not None:
+            cols[1].metric("Active fires", int(fire_count))
+
+        reasoning = summary_source.get("reasoning")
+        if reasoning:
+            st.markdown(f"**Reasoning:** {reasoning}")
+
+    if isinstance(result_payload, dict):
+        artifact_lines = []
+        if output_file := result_payload.get("output_file"):
+            artifact_lines.append(f"- Local file: `{output_file}`")
+        if s3_key := result_payload.get("s3_key"):
+            artifact_lines.append(f"- S3 key: `{s3_key}`")
+        if artifact_lines:
+            st.markdown("**Artifacts**\n" + "\n".join(artifact_lines))
+
+        with st.expander("Raw forecast runner output"):
+            st.json(result_payload)
+    elif result_payload is not None:
+        with st.expander("Raw forecast runner output"):
+            st.write(result_payload)
 
 @st.cache_data(ttl=300)  # Cache for 5 minutes
 def load_historical_forecasts(days: int = 7) -> list[dict[str, Any]]:
@@ -1626,25 +2014,31 @@ with tab1:
     st.info("Current Status: Standby. Waiting for SensorIngest refresh.")
     
     if st.button("Run 24h Forecast Analysis", type="primary"):
-        if forecast_crew is None:
-            st.error("Forecast crew not available. Please check agent configuration.")
+        if run_forecast_cycle is None:
+            st.error("Forecast runner not available. Please check agent configuration.")
         else:
             with st.spinner("ForecastAgent is analyzing meteorological data & fire counts..."):
                 try:
-                    result = forecast_crew.kickoff()
-                    st.success("Forecast Generated!")
-                    st.json(result)
-                    
-                    # Store result in session state
-                    st.session_state["forecast_result"] = result
+                    cycle_result = run_forecast_cycle()
+                    latest_snapshot = load_forecast_data()
+                    st.session_state["forecast_cycle_result"] = cycle_result
+                    st.session_state["forecast_cycle_snapshot"] = latest_snapshot
                 except Exception as e:
+                    error_payload = {
+                        "success": False,
+                        "error": "Forecast cycle raised an exception",
+                        "details": str(e),
+                    }
+                    st.session_state["forecast_cycle_result"] = error_payload
+                    st.session_state["forecast_cycle_snapshot"] = None
                     st.error(f"Forecast generation failed: {e}")
                     st.exception(e)
     
-    # Display previous result if available
-    if "forecast_result" in st.session_state:
-        st.subheader("Latest Forecast Result")
-        st.json(st.session_state["forecast_result"])
+    st.subheader("Manual Forecast Run")
+    render_forecast_run_status(
+        st.session_state.get("forecast_cycle_result"),
+        st.session_state.get("forecast_cycle_snapshot", forecast_data),
+    )
 
 # Enforcement Tab
 with tab2:
