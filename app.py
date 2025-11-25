@@ -21,6 +21,10 @@ import boto3
 import numpy as np
 import pandas as pd
 import streamlit as st
+import warnings
+
+# Suppress numpy divide warnings from pandas operations (handled by dropna() before mean())
+warnings.filterwarnings('ignore', category=RuntimeWarning, message='invalid value encountered in divide')
 from crewai import Crew, Process
 from dotenv import load_dotenv
 import importlib.util
@@ -402,7 +406,8 @@ sys.path.insert(0, str(enforcement_agent_dir))
 
 modules_to_remove = [mod for mod in sys.modules.keys() if mod.startswith('src.')]
 for mod in modules_to_remove:
-    del sys.modules[mod]
+    if mod in sys.modules:
+        del sys.modules[mod]
 
 try:
     enforcement_agents_spec = importlib.util.spec_from_file_location(
@@ -1238,9 +1243,14 @@ else:
     # Fallback to calculating from sensor data if forecast not available
     if not data.empty:
         aqi_records = data[data["type"] == "AQI"]
-        if not aqi_records.empty:
-            delhi_avg_aqi = aqi_records["value"].mean()
-            if pd.isna(delhi_avg_aqi):
+        if not aqi_records.empty and "value" in aqi_records.columns:
+            # Filter out NaN values before calculating mean to avoid numpy warnings
+            valid_values = aqi_records["value"].dropna()
+            if not valid_values.empty:
+                delhi_avg_aqi = valid_values.mean()
+                if pd.isna(delhi_avg_aqi) or not np.isfinite(delhi_avg_aqi):
+                    delhi_avg_aqi = 0
+            else:
                 delhi_avg_aqi = 0
             if delhi_avg_aqi > 400:
                 aqi_category = "Severe"
@@ -1565,9 +1575,14 @@ if not data.empty:
         with col_stat2:
             st.metric("Active Fires", len(fire_data))
         with col_stat3:
-            if not aqi_data.empty:
-                avg_aqi = aqi_data["value"].mean()
-                if pd.isna(avg_aqi):
+            if not aqi_data.empty and "value" in aqi_data.columns:
+                # Filter out NaN values before calculating mean to avoid numpy warnings
+                valid_values = aqi_data["value"].dropna()
+                if not valid_values.empty:
+                    avg_aqi = valid_values.mean()
+                    if pd.isna(avg_aqi) or not np.isfinite(avg_aqi):
+                        avg_aqi = 0
+                else:
                     avg_aqi = 0
                 st.metric("Avg AQI", f"{avg_aqi:.0f}")
         
@@ -2236,8 +2251,13 @@ with tab6:
                         st.metric("Stations", len(aqi_data))
                     with col2:
                         if "value" in aqi_data.columns:
-                            avg_aqi = aqi_data["value"].mean()
-                            if pd.isna(avg_aqi):
+                            # Filter out NaN values before calculating mean to avoid numpy warnings
+                            valid_values = aqi_data["value"].dropna()
+                            if not valid_values.empty:
+                                avg_aqi = valid_values.mean()
+                                if pd.isna(avg_aqi) or not np.isfinite(avg_aqi):
+                                    avg_aqi = 0
+                            else:
                                 avg_aqi = 0
                         else:
                             avg_aqi = 0
