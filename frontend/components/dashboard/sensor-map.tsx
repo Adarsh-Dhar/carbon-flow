@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { MapPin, Flame, Wind, Eye, EyeOff } from "lucide-react"
 import { getAQICategory, getAQIColor, AQI_CATEGORIES, type AQICategory } from "@/lib/types"
 import type { SensorData, ForecastLatest } from "@/lib/types"
+import "leaflet/dist/leaflet.css"
 
 interface SensorMapProps {
   sensors: SensorData | undefined
@@ -17,7 +18,6 @@ interface SensorMapProps {
   hasError?: boolean
 }
 
-// Simulated map component (Leaflet would be used in production)
 export function SensorMap({ sensors, forecast, isLoading, hasError = false }: SensorMapProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -25,6 +25,20 @@ export function SensorMap({ sensors, forecast, isLoading, hasError = false }: Se
   const [showFires, setShowFires] = useState(searchParams.get("fires") !== "false")
   const [showSurgesOnly, setShowSurgesOnly] = useState(searchParams.get("surges") === "true")
   const [categoryFilter, setCategoryFilter] = useState<string>(searchParams.get("category") || "all")
+  const [leafletLib, setLeafletLib] = useState<typeof import("react-leaflet") | null>(null)
+
+  useEffect(() => {
+    let isMounted = true
+    ;(async () => {
+      const module = await import("react-leaflet")
+      if (isMounted) {
+        setLeafletLib(module)
+      }
+    })()
+    return () => {
+      isMounted = false
+    }
+  }, [])
 
   // Update URL params when filters change
   useEffect(() => {
@@ -59,6 +73,31 @@ export function SensorMap({ sensors, forecast, isLoading, hasError = false }: Se
 
   const windDirection = forecast?.prediction?.data_sources?.avg_wind_direction_24h_deg
   const windSpeed = forecast?.prediction?.data_sources?.avg_wind_speed_24h_kmh
+  const delhiCenter: [number, number] = [28.6139, 77.209]
+
+  const stationMarkers = useMemo(
+    () =>
+      filteredStations.filter(
+        (station) =>
+          typeof station.lat === "number" &&
+          !Number.isNaN(station.lat) &&
+          typeof station.lon === "number" &&
+          !Number.isNaN(station.lon),
+      ),
+    [filteredStations],
+  )
+
+  const fireMarkers = useMemo(
+    () =>
+      sensors?.nasa_data?.filter(
+        (fire) =>
+          typeof fire.lat === "number" &&
+          !Number.isNaN(fire.lat) &&
+          typeof fire.lon === "number" &&
+          !Number.isNaN(fire.lon),
+      ) ?? [],
+    [sensors?.nasa_data],
+  )
 
   if (!isLoading && (hasError || (!hasStations && !hasFires))) {
     return (
@@ -111,105 +150,91 @@ export function SensorMap({ sensors, forecast, isLoading, hasError = false }: Se
       </div>
 
       {/* Map Container */}
-      <Card className="glass-card p-0 overflow-hidden relative" style={{ height: 600 }}>
-        {/* Simulated Map Background */}
-        <div
-          className="absolute inset-0 bg-cover bg-center opacity-40"
-          style={{
-            backgroundImage: `url('/delhi-satellite-map-dark.jpg')`,
-            filter: "saturate(0.5) brightness(0.6)",
-          }}
-        />
-
-        {/* Map Overlay */}
-        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-background/30 to-background/60" />
-
-        {/* Station Markers */}
-        <div className="absolute inset-0 p-8">
-          {filteredStations.map((station, index) => {
-            const size = Math.max(20, Math.min(50, station.aqi / 10))
-            const color = getAQIColor(station.aqi)
-            // Distribute stations visually
-            const left = 15 + (index % 5) * 18 + Math.random() * 5
-            const top = 15 + Math.floor(index / 5) * 20 + Math.random() * 5
-
-            return (
-              <div
-                key={station.station}
-                className="absolute group cursor-pointer transition-transform hover:scale-110 z-10"
-                style={{
-                  left: `${left}%`,
-                  top: `${top}%`,
-                  transform: "translate(-50%, -50%)",
-                }}
-              >
-                <div
-                  className="rounded-full flex items-center justify-center shadow-lg"
-                  style={{
-                    width: size,
-                    height: size,
-                    backgroundColor: `${color}40`,
-                    border: `2px solid ${color}`,
-                    boxShadow: `0 0 20px ${color}40`,
-                  }}
-                >
-                  <span className="text-xs font-bold text-white">{station.aqi}</span>
-                </div>
-
-                {/* Tooltip */}
-                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 opacity-0 group-hover:opacity-100 transition-opacity z-20">
-                  <Card className="glass p-3 min-w-[180px]">
-                    <p className="font-semibold text-sm text-foreground mb-1">{station.station}</p>
-                    <div className="space-y-1 text-xs text-muted-foreground">
-                      <p>
-                        AQI: <span className="text-foreground font-medium">{station.aqi}</span>
-                      </p>
-                      <p>
-                        PM2.5: <span className="text-foreground">{station.pm25} µg/m³</span>
-                      </p>
-                      <p>
-                        PM10: <span className="text-foreground">{station.pm10} µg/m³</span>
-                      </p>
-                      <p>Updated: {new Date(station.timestamp).toLocaleTimeString()}</p>
-                    </div>
-                  </Card>
-                </div>
-              </div>
-            )
-          })}
-
-          {/* Fire Hotspots */}
-          {showFires &&
-            sensors?.nasa_data?.map((fire, index) => {
-              const left = 60 + (index % 4) * 8 + Math.random() * 3
-              const top = 10 + Math.floor(index / 4) * 15 + Math.random() * 5
-
-              return (
-                <div
-                  key={`fire-${index}`}
-                  className="absolute pulse-fire z-5"
-                  style={{
-                    left: `${left}%`,
-                    top: `${top}%`,
-                    transform: "translate(-50%, -50%)",
-                  }}
-                >
-                  <div className="w-3 h-3 rounded-full bg-red-500 shadow-lg shadow-red-500/50" />
-                </div>
-              )
-            })}
-
-          {/* Wind Arrow */}
-          {windDirection !== undefined && windSpeed !== undefined && (
-            <div
-              className="absolute bottom-6 right-6 flex items-center gap-2 glass rounded-lg px-4 py-2"
-              style={{ transform: `rotate(${windDirection}deg)` }}
+      <Card className="glass-card p-0 overflow-hidden relative" style={{ height: 520 }}>
+        <div className="absolute inset-0">
+          {leafletLib ? (
+            <leafletLib.MapContainer
+              center={delhiCenter}
+              zoom={11}
+              scrollWheelZoom
+              className="h-full w-full"
+              zoomControl={false}
+              attributionControl={false}
             >
-              <Wind className="h-5 w-5 text-primary" />
-              <span className="text-sm font-medium text-foreground">{windSpeed.toFixed(1)} km/h</span>
-            </div>
+              <leafletLib.TileLayer
+                url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> & Carto'
+              />
+              <leafletLib.LayerGroup>
+                {stationMarkers.map((station) => {
+                  const radius = Math.max(8, Math.min(25, station.aqi / 8))
+                  const color = getAQIColor(station.aqi)
+                  return (
+                    <leafletLib.CircleMarker
+                      key={station.station}
+                      center={[station.lat, station.lon]}
+                      radius={radius}
+                      pathOptions={{
+                        color,
+                        weight: 2,
+                        fillColor: color,
+                        fillOpacity: 0.35,
+                      }}
+                    >
+                      <leafletLib.Popup>
+                        <div className="space-y-1 text-sm">
+                          <p className="font-semibold text-foreground">{station.station}</p>
+                          <p>
+                            AQI: <span className="font-medium">{station.aqi}</span>
+                          </p>
+                          <p>PM2.5: {station.pm25 ?? "--"} µg/m³</p>
+                          <p>PM10: {station.pm10 ?? "--"} µg/m³</p>
+                          <p>
+                            Updated:{" "}
+                            {station.timestamp ? new Date(station.timestamp).toLocaleTimeString() : "N/A"}
+                          </p>
+                        </div>
+                      </leafletLib.Popup>
+                    </leafletLib.CircleMarker>
+                  )
+                })}
+              </leafletLib.LayerGroup>
+
+              {showFires && fireMarkers.length > 0 && (
+                <leafletLib.LayerGroup>
+                  {fireMarkers.map((fire, index) => (
+                    <leafletLib.CircleMarker
+                      key={`fire-${fire.lat}-${fire.lon}-${index}`}
+                      center={[fire.lat, fire.lon]}
+                      radius={5}
+                      className="pulse-fire"
+                      pathOptions={{
+                        color: "#ef4444",
+                        fillColor: "#ef4444",
+                        fillOpacity: 0.9,
+                      }}
+                    />
+                  ))}
+                </leafletLib.LayerGroup>
+              )}
+            </leafletLib.MapContainer>
+          ) : (
+            <div className="flex h-full w-full items-center justify-center text-muted-foreground">Initializing map...</div>
           )}
         </div>
+
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-transparent via-background/40 to-background/80 z-10" />
+
+        {/* Wind Arrow */}
+        {windDirection !== undefined && windSpeed !== undefined && (
+          <div
+            className="absolute bottom-6 right-6 z-20 flex items-center gap-2 glass rounded-lg px-4 py-2"
+            style={{ transform: `rotate(${windDirection}deg)` }}
+          >
+            <Wind className="h-5 w-5 text-primary" />
+            <span className="text-sm font-medium text-foreground">{windSpeed.toFixed(1)} km/h</span>
+          </div>
+        )}
 
         {/* Legend */}
         <Card className="absolute top-4 left-4 glass p-4 z-20">

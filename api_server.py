@@ -391,6 +391,48 @@ def get_orchestrator_state() -> dict[str, Any]:
     return state
 
 
+def _normalize_timestamp(timestamp: Any) -> str | None:
+    """Normalize various timestamp formats into ISO 8601 string."""
+    if timestamp is None:
+        return None
+
+    if isinstance(timestamp, (int, float)):
+        try:
+            dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+            return dt.isoformat().replace("+00:00", "Z")
+        except (ValueError, OSError, OverflowError):
+            return None
+
+    ts_str = str(timestamp).strip()
+    if not ts_str:
+        return None
+
+    # Already ISO formatted?
+    try:
+        dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    except ValueError:
+        pass
+
+    # Known CPCB formats (e.g., "14-11-2025 08:00:00")
+    known_formats = (
+        "%d-%m-%Y %H:%M:%S",
+        "%d-%m-%Y %H:%M",
+        "%d/%m/%Y %H:%M:%S",
+        "%d/%m/%Y %H:%M",
+    )
+    for fmt in known_formats:
+        try:
+            dt = datetime.strptime(ts_str, fmt).replace(tzinfo=timezone.utc)
+            return dt.isoformat().replace("+00:00", "Z")
+        except ValueError:
+            continue
+
+    return None
+
+
 def read_sensor_data() -> dict[str, Any] | None:
     """
     Read latest sensor data using orchestrator's function.
@@ -465,7 +507,9 @@ def _parse_sensor_data_list(data: list[dict[str, Any]]) -> dict[str, Any]:
                     'aqi': 0,
                     'pm25': None,
                     'pm10': None,
-                    'timestamp': record.get('last_update') or record.get('date') or record.get('timestamp'),
+                    'timestamp': _normalize_timestamp(
+                        record.get('last_update') or record.get('date') or record.get('timestamp')
+                    ),
                     'latitude': record.get('latitude'),
                     'longitude': record.get('longitude')
                 }
@@ -518,7 +562,12 @@ def _parse_sensor_data_list(data: list[dict[str, Any]]) -> dict[str, Any]:
                     'lon': float(record.get('longitude', 0)),
                     'brightness': float(record.get('brightness', 0)),
                     'confidence': float(record.get('confidence', 0)),
-                    'timestamp': record.get('acq_date') or record.get('timestamp') or datetime.now(tz=timezone.utc).isoformat()
+                    'timestamp': _normalize_timestamp(
+                        record.get('timestamp')
+                        or f"{record.get('acq_date', '')} {record.get('acq_time', '')}".strip()
+                        or record.get('acq_date')
+                    )
+                    or datetime.now(tz=timezone.utc).isoformat().replace("+00:00", "Z")
                 }
                 nasa_fire_data.append(fire_data)
             except (ValueError, TypeError):
@@ -554,7 +603,9 @@ def _parse_sensor_data_list(data: list[dict[str, Any]]) -> dict[str, Any]:
         result["dss_data"] = {
             "stubble_burning_percent": stubble_pct or 0,
             "affected_area_km2": 0,  # Default if not available
-            "timestamp": dss_records[0].get('date') or dss_records[0].get('timestamp') or datetime.now(tz=timezone.utc).isoformat()
+            "timestamp": _normalize_timestamp(
+                dss_records[0].get('date') or dss_records[0].get('timestamp')
+            ) or datetime.now(tz=timezone.utc).isoformat().replace("+00:00", "Z")
         }
     
     return result
