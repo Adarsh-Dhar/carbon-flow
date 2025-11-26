@@ -11,7 +11,7 @@ from typing import Any, Callable
 from datetime import datetime
 
 from src.tools import cpcb_tools, nasa_tools, dss_tools, storage_tools
-from src.tools import s3_reader_tools, meteo_tools, prediction_tools, output_tools
+from src.tools import s3_reader_tools, meteo_tools, prediction_tools, output_tools, asthma_health_tools
 from src.utils.env_config import configure_llm_from_env
 
 configure_llm_from_env()
@@ -109,6 +109,28 @@ def save_latest_to_s3_from_cache() -> Any:
 
 class _EmptyToolArgs(BaseModel):
     security_context: dict | None = None  # allow CrewAI to inject its context
+
+    if ConfigDict:
+        model_config = ConfigDict(extra="forbid")
+    else:  # pragma: no cover - pydantic < 2.x
+        class Config:
+            extra = "forbid"
+
+
+class AsthmaHealthRecommendationInput(BaseModel):
+    """Input schema for asthma health recommendation tool."""
+    aqi_value: float
+    aqi_category: str
+    prediction_context: dict[str, Any]
+    risk_level: str
+    outdoor_activity: str
+    exercise_recommendation: str
+    medication_reminder: bool
+    mask_recommendation: bool
+    indoor_air_quality_tips: list[str]
+    symptoms_to_watch: list[str]
+    emergency_advice: str
+    security_context: dict | None = None
 
     if ConfigDict:
         model_config = ConfigDict(extra="forbid")
@@ -270,6 +292,28 @@ generate_output_tool_wrapped = Tool(
     args_schema=_EmptyToolArgs
 )
 
+generate_asthma_recommendation_tool = Tool(
+    name="Generate asthma health recommendation",
+    description=(
+        "Generate and format personalized health recommendations for asthma patients based on AQI analysis. "
+        "You must analyze the AQI value, category, and prediction context to determine: "
+        "- Risk level (Low, Moderate, High, or Severe) based on your medical expertise "
+        "- Outdoor activity guidance (Safe, Limited, or Avoid) "
+        "- Exercise recommendations (Normal, Reduce, or Avoid) "
+        "- Whether preventive medication should be taken "
+        "- Whether N95 mask should be worn "
+        "- Indoor air quality tips specific to the risk level "
+        "- Symptoms that asthma patients should watch for "
+        "- Emergency advice for when to seek medical attention. "
+        "Use your medical knowledge to assess how the AQI level affects asthma patients' daily lives."
+    ),
+    func=_with_debug_logs(
+        "Generate asthma health recommendation",
+        asthma_health_tools.generate_asthma_health_recommendation_tool
+    ),
+    args_schema=AsthmaHealthRecommendationInput
+)
+
 
 # ForecastAgent Agents
 
@@ -289,17 +333,23 @@ data_retrieval_agent = Agent(
 )
 
 forecast_analysis_agent = Agent(
-    role="Air Quality Forecaster and Reasoner",
-    goal="Generate accurate 24-hour AQI predictions with confidence levels and clear reasoning",
+    role="Asthma Health Advisor and Air Quality Forecaster",
+    goal="Generate accurate 24-hour AQI predictions with personalized health recommendations for asthma patients",
     backstory=(
-        "You are an expert air quality analyst who understands the complex relationships between "
-        "fire events, meteorological conditions, pollution sources, and AQI levels. You synthesize "
-        "multiple data streams to predict air quality trends and explain your reasoning clearly for "
-        "policy makers. Your predictions enable Delhi to shift from reactive to proactive air quality "
-        "management policies."
+        "You are an expert respiratory health advisor who understands how air quality affects asthma patients' "
+        "daily lives. You have deep medical knowledge about asthma triggers, symptoms, and management. "
+        "You synthesize multiple data streams to predict air quality trends and provide clear, actionable "
+        "health recommendations. Your predictions help asthma patients plan their activities, manage medications, "
+        "and avoid dangerous exposure to poor air quality. You translate complex AQI data into practical, "
+        "life-saving advice for people with respiratory conditions. "
+        "You use your medical expertise to assess risk levels and make personalized recommendations - "
+        "you don't rely on simple thresholds, but rather analyze the full context including current AQI, "
+        "predicted trends, fire counts, wind patterns, and pollution sources to determine the appropriate "
+        "health guidance for asthma patients."
     ),
     tools=[
         synthesize_predict_tool,
+        generate_asthma_recommendation_tool,
         generate_output_tool_wrapped,
     ],
     verbose=True,

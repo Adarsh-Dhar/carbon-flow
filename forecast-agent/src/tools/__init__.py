@@ -10,6 +10,7 @@ from . import s3_reader_tools
 from . import meteo_tools
 from . import prediction_tools
 from . import output_tools
+from . import asthma_health_tools
 
 # Import specific functions for backward compatibility
 from .output_tools import generate_output_tool
@@ -27,6 +28,7 @@ __all__ = [
     "meteo_tools",
     "prediction_tools",
     "output_tools",
+    "asthma_health_tools",
     # Function exports
     "generate_output_tool",
     "synthesize_and_predict",

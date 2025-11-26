@@ -3,7 +3,7 @@
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
-import { CheckCircle2, XCircle, Clock, Loader2, Database, CloudSun, Shield, FileText } from "lucide-react"
+import { CheckCircle2, XCircle, Clock, Loader2, Database, CloudSun, FileText } from "lucide-react"
 import type { AgentHistory, AgentHistoryEntry } from "@/lib/types"
 
 interface ActivityLogProps {
@@ -15,15 +15,11 @@ interface ActivityLogProps {
 const agentIcons = {
   sensor_ingest: Database,
   forecast: CloudSun,
-  enforcement: Shield,
-  accountability: FileText,
 }
 
 const agentLabels = {
   sensor_ingest: "Sensor Ingest",
   forecast: "Forecast",
-  enforcement: "Enforcement",
-  accountability: "Accountability",
 }
 
 const statusConfig = {

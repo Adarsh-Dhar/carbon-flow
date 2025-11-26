@@ -126,6 +126,11 @@ def _format_output_json(prediction_data: dict[str, Any], timestamp: str) -> dict
         "estimated_hours_to_threshold": estimated_hours
     }
     
+    # Try to get health recommendation from cache (set by agent)
+    # Import here to avoid circular dependency
+    from src.agents import TOOL_RESULT_CACHE
+    health_recommendation = TOOL_RESULT_CACHE.get("Generate asthma health recommendation", {})
+    
     # Build data sources metadata
     data_sources = {}
     
@@ -156,6 +161,7 @@ def _format_output_json(prediction_data: dict[str, Any], timestamp: str) -> dict
     # Construct final output JSON
     output_json = {
         "prediction": prediction_obj,
+        "health_recommendation": health_recommendation,
         "confidence_level": prediction_data.get("confidence_level", 0.0),
         "reasoning": prediction_data.get("reasoning", ""),
         "timestamp": timestamp,

@@ -32,8 +32,6 @@ interface RightSidebarProps {
 const agents = [
   { key: "sensor_ingest", label: "Sensor Ingest", icon: Database },
   { key: "forecast", label: "Forecast", icon: CloudSun },
-  { key: "enforcement", label: "Enforcement", icon: Shield },
-  { key: "accountability", label: "Accountability", icon: FileText },
 ] as const
 
 const intervalOptions: { value: RefreshInterval; label: string }[] = [
@@ -170,7 +168,6 @@ export function RightSidebar({ status, isLoading, hasError = false }: RightSideb
           {[
             { label: "Forecast", timestamp: status?.agents?.forecast?.last_run || null },
             { label: "Sensors", timestamp: status?.agents?.sensor_ingest?.last_run || null },
-            { label: "Accountability", timestamp: status?.agents?.accountability?.last_run || null },
           ].map((item) => (
             <div key={item.label} className="flex items-center justify-between">
               <span className="text-muted-foreground">{item.label}</span>
@@ -181,28 +178,6 @@ export function RightSidebar({ status, isLoading, hasError = false }: RightSideb
             </div>
           ))}
         </div>
-      </Card>
-
-      {/* Recent Report */}
-      <Card className="glass-card p-4 mb-6">
-        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Latest Report</h3>
-        {hasError ? (
-          <p className="text-sm text-destructive font-semibold">ERR</p>
-        ) : status?.agents?.accountability?.last_run ? (
-          <div className="space-y-2 text-sm">
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Last generated</span>
-              <span className="text-foreground">
-                {new Date(status.agents.accountability.last_run).toLocaleString()}
-              </span>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Download the latest accountability PDF from the Accountability tab.
-            </p>
-          </div>
-        ) : (
-          <p className="text-sm text-muted-foreground">No accountability reports have been generated yet.</p>
-        )}
       </Card>
 
       {/* Notifications Placeholder */}

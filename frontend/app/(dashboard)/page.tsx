@@ -8,12 +8,10 @@ import { KPIGrid } from "@/components/dashboard/kpi-grid"
 import { SensorMap } from "@/components/dashboard/sensor-map"
 import { AgentTabs } from "@/components/dashboard/agent-tabs"
 import { RightSidebar } from "@/components/dashboard/right-sidebar"
-import { EnforcementModal } from "@/components/dashboard/enforcement-modal"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { getStatus, getForecastLatest, getSensorsLatest, getAgentHistory, getForecastHistory } from "@/lib/api"
 
 function DashboardContent() {
-  const [enforcementModalOpen, setEnforcementModalOpen] = useState(false)
 
   // Queries hit live API and surface empty states if unavailable
   const statusQuery = useQuery({
@@ -75,7 +73,6 @@ function DashboardContent() {
             status={statusQuery.data}
             isLoading={statusQuery.isLoading}
             hasError={statusError}
-            onEnforcementClick={() => setEnforcementModalOpen(true)}
           />
 
           <KPIGrid
@@ -100,20 +97,12 @@ function DashboardContent() {
             forecastError={forecastError}
             historyError={historyError}
             trendsError={trendsError}
-            onEnforcementClick={() => setEnforcementModalOpen(true)}
           />
         </div>
       </main>
 
       {/* Right Sidebar */}
       <RightSidebar status={statusQuery.data} isLoading={statusQuery.isLoading} hasError={statusError} />
-
-      {/* Enforcement Modal */}
-      <EnforcementModal
-        open={enforcementModalOpen}
-        onOpenChange={setEnforcementModalOpen}
-        forecast={forecastQuery.data}
-      />
     </div>
   )
 }

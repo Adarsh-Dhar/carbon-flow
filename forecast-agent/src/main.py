@@ -29,6 +29,7 @@ from src.tasks import (
     task_retrieve_sensor_data,
     task_retrieve_meteo_forecast,
     task_generate_prediction,
+    task_generate_asthma_recommendations,
     task_output_forecast,
 )
 from src.utils.env_config import configure_llm_from_env, validate_required_env_vars
@@ -48,6 +49,7 @@ forecast_crew = Crew(
         task_retrieve_sensor_data,
         task_retrieve_meteo_forecast,
         task_generate_prediction,
+        task_generate_asthma_recommendations,
         task_output_forecast,
     ],
     process=Process.sequential,

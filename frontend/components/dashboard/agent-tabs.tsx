@@ -10,7 +10,6 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   CloudSun,
-  Shield,
   FileText,
   TrendingUp,
   Activity,
@@ -25,13 +24,12 @@ import {
   RefreshCw,
 } from "lucide-react"
 import { useAgentAction } from "@/hooks/use-agent-action"
-import { runForecastCycle, runAccountability, downloadAccountabilityPDF } from "@/lib/api"
+import { runForecastCycle } from "@/lib/api"
 import type {
   ForecastLatest,
   AgentHistory,
   AgentHistoryEntry,
   ForecastHistoryEntry,
-  AccountabilityReport,
 } from "@/lib/types"
 import { TrendsCharts } from "./trends-charts"
 import { ActivityLog } from "./activity-log"
@@ -44,7 +42,6 @@ interface AgentTabsProps {
   forecastError?: boolean
   historyError?: boolean
   trendsError?: boolean
-  onEnforcementClick: () => void
 }
 
 export function AgentTabs({
@@ -55,12 +52,8 @@ export function AgentTabs({
   forecastError = false,
   historyError = false,
   trendsError = false,
-  onEnforcementClick,
 }: AgentTabsProps) {
   const [jsonExpanded, setJsonExpanded] = useState(false)
-  const [accountabilityReport, setAccountabilityReport] = useState<AccountabilityReport | null>(null)
-
-  const enforcementHistory = history?.enforcement ?? []
 
   const getBadgeClass = (status: AgentHistoryEntry["status"]) => {
     switch (status) {
@@ -82,27 +75,6 @@ export function AgentTabs({
     errorMessage: "Forecast cycle failed",
   })
 
-  const accountabilityAction = useAgentAction({
-    actionFn: runAccountability,
-    queryKeysToInvalidate: ["status"],
-    successMessage: "Accountability report generated",
-    errorMessage: "Failed to generate report",
-    onSuccess: (data) => setAccountabilityReport(data),
-  })
-
-  const handleDownloadPDF = async () => {
-    try {
-      const blob = await downloadAccountabilityPDF()
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement("a")
-      a.href = url
-      a.download = `accountability-report-${new Date().toISOString().split("T")[0]}.pdf`
-      a.click()
-      URL.revokeObjectURL(url)
-    } catch (error) {
-      console.error("Failed to download PDF:", error)
-    }
-  }
 
   return (
     <Tabs defaultValue="forecast" className="mb-6">
@@ -113,20 +85,6 @@ export function AgentTabs({
         >
           <CloudSun className="h-4 w-4" />
           Forecast
-        </TabsTrigger>
-        <TabsTrigger
-          value="enforcement"
-          className="gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"
-        >
-          <Shield className="h-4 w-4" />
-          Enforcement
-        </TabsTrigger>
-        <TabsTrigger
-          value="accountability"
-          className="gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"
-        >
-          <FileText className="h-4 w-4" />
-          Accountability
         </TabsTrigger>
         <TabsTrigger
           value="trends"
@@ -222,142 +180,6 @@ export function AgentTabs({
             </Card>
           </CollapsibleContent>
         </Collapsible>
-      </TabsContent>
-
-      {/* Enforcement Tab */}
-      <TabsContent value="enforcement" className="mt-4">
-        <Alert className="mb-4 border-orange bg-orange/10">
-          <AlertTriangle className="h-4 w-4 text-orange" />
-          <AlertDescription className="text-orange">
-            Autonomous enforcement actions require explicit authorization. Review the forecast reasoning before
-            proceeding.
-          </AlertDescription>
-        </Alert>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <Card className="glass-card p-5">
-            <h3 className="font-semibold text-foreground mb-3">Forecast Reasoning</h3>
-            <p className="text-sm text-muted-foreground mb-4">
-              {forecast?.prediction?.reasoning || "No forecast reasoning available. Run a forecast cycle first."}
-            </p>
-            <Button
-              onClick={onEnforcementClick}
-              variant="destructive"
-              className="w-full gap-2 bg-orange hover:bg-orange/90"
-            >
-              <Shield className="h-4 w-4" />
-              Authorize Autonomous Enforcement
-            </Button>
-          </Card>
-
-          <Card className="glass-card p-5">
-            <h3 className="font-semibold text-foreground mb-3">Action Log</h3>
-            <div className="space-y-3">
-              {historyError ? (
-                <p className="text-sm text-destructive font-semibold">ERR</p>
-              ) : enforcementHistory.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No enforcement activity recorded yet.</p>
-              ) : (
-                enforcementHistory.map((entry, idx) => (
-                  <div
-                    key={`${entry.timestamp}-${idx}`}
-                    className="flex items-center justify-between py-2 border-b border-border last:border-0"
-                  >
-                    <div>
-                      <p className="text-sm text-foreground capitalize">{entry.status}</p>
-                      <p className="text-xs text-muted-foreground">{entry.message}</p>
-                    </div>
-                    <Badge className={getBadgeClass(entry.status)}>
-                      <Clock className="h-3 w-3 mr-1" />
-                      {new Date(entry.timestamp).toLocaleTimeString()}
-                    </Badge>
-                  </div>
-                ))
-              )}
-            </div>
-          </Card>
-        </div>
-      </TabsContent>
-
-      {/* Accountability Tab */}
-      <TabsContent value="accountability" className="mt-4">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <Card className="glass-card p-5">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-semibold text-foreground">Generate Report</h3>
-              <Badge variant="outline" className="text-success border-success">
-                Ready
-              </Badge>
-            </div>
-            <Button
-              onClick={() => accountabilityAction.execute()}
-              disabled={accountabilityAction.isLoading}
-              className="w-full gap-2 mb-3"
-            >
-              {accountabilityAction.isLoading ? (
-                <RefreshCw className="h-4 w-4 animate-spin" />
-              ) : (
-                <FileText className="h-4 w-4" />
-              )}
-              Run Accountability Analysis
-            </Button>
-            {accountabilityReport && (
-              <Button variant="outline" onClick={handleDownloadPDF} className="w-full gap-2 bg-transparent">
-                <Download className="h-4 w-4" />
-                Download PDF
-              </Button>
-            )}
-          </Card>
-
-          {accountabilityReport && (
-            <>
-              <Card className="glass-card p-5">
-                <h3 className="font-semibold text-foreground mb-2">Executive Summary</h3>
-                <p className="text-sm text-muted-foreground mb-3">{accountabilityReport.executive_summary}</p>
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Report ID</span>
-                    <span className="font-mono text-foreground">{accountabilityReport.id}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Generated</span>
-                    <span className="text-foreground">
-                      {new Date(accountabilityReport.generated_at).toLocaleString()}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Confidence</span>
-                    <span className="text-foreground">{accountabilityReport.confidence_percent}%</span>
-                  </div>
-                </div>
-              </Card>
-
-              <Card className="glass-card p-5">
-                <h3 className="font-semibold text-foreground mb-3">Fire Correlation</h3>
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Fire Count</span>
-                    <span className="text-orange font-semibold">
-                      {accountabilityReport.fire_correlation.fire_count}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Correlation Strength</span>
-                    <span className="text-foreground">
-                      {(accountabilityReport.fire_correlation.correlation_strength * 100).toFixed(1)}%
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Primary Source</span>
-                    <span className="text-foreground">
-                      {accountabilityReport.fire_correlation.primary_source_direction}
-                    </span>
-                  </div>
-                </div>
-              </Card>
-            </>
-          )}
-        </div>
       </TabsContent>
 
       {/* Trends Tab */}

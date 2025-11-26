@@ -86,10 +86,39 @@ task_generate_prediction = Task(
     context=[task_retrieve_sensor_data, task_retrieve_meteo_forecast],
 )
 
+task_generate_asthma_recommendations = Task(
+    description=(
+        "Analyze the AQI prediction and generate personalized health recommendations for asthma patients. "
+        "Review the prediction data including AQI value, category, estimated hours to threshold, fire counts, "
+        "wind speed, and pollution sources. "
+        "Using your medical expertise, determine: "
+        "1. Risk level (Low, Moderate, High, or Severe) - consider not just the AQI number but also the trend, "
+        "   time until threshold, and environmental factors "
+        "2. Outdoor activity guidance (Safe, Limited, or Avoid) - based on risk assessment "
+        "3. Exercise recommendations (Normal, Reduce, or Avoid) - considering asthma triggers "
+        "4. Whether preventive medication should be taken (true/false) "
+        "5. Whether N95 mask should be worn when going outside (true/false) "
+        "6. Indoor air quality tips - provide 5-7 specific, actionable tips for maintaining indoor air quality "
+        "7. Symptoms to watch - list specific symptoms that may worsen (e.g., 'Persistent coughing', 'Wheezing') "
+        "8. Emergency advice - clear guidance on when to seek medical attention "
+        "Use the 'Generate asthma health recommendation' tool to format your analysis. "
+        "Make your recommendations based on medical best practices for asthma management, not just AQI thresholds."
+    ),
+    expected_output=(
+        "A structured health recommendation dictionary with risk_level, outdoor_activity, "
+        "exercise_recommendation, medication_reminder, mask_recommendation, indoor_air_quality_tips, "
+        "symptoms_to_watch, and emergency_advice fields. The recommendations should reflect your medical "
+        "analysis of how the predicted AQI conditions will affect asthma patients' daily lives."
+    ),
+    agent=forecast_analysis_agent,
+    context=[task_generate_prediction],
+)
+
 task_output_forecast = Task(
     description=(
-        "Format the prediction data into a structured JSON output and save it to the specified location. "
+        "Format the prediction data and health recommendations into a structured JSON output and save it. "
         "The JSON must contain prediction (with aqi_category, threshold, estimated_hours_to_threshold), "
+        "health_recommendation (with risk_level, outdoor_activity, exercise_recommendation, etc.), "
         "confidence_level, reasoning, timestamp, and data_sources metadata. "
         "Write the JSON to a local file in the forecast-agent/output/ directory with timestamp-based filename. "
         "If FORECAST_UPLOAD_TO_S3 environment variable is true, also upload the JSON to AWS S3 in the forecasts/ prefix."
@@ -101,5 +130,5 @@ task_output_forecast = Task(
         "'timestamp': '2025-11-13T10:30:00Z'}"
     ),
     agent=forecast_analysis_agent,
-    context=[task_generate_prediction],
+    context=[task_generate_prediction, task_generate_asthma_recommendations],
 )
