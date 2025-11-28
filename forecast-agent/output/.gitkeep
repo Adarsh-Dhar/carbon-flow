@@ -1,2 +1,0 @@
-# This file ensures the output directory is tracked in git
-# Forecast JSON files will be stored here but excluded via .gitignore

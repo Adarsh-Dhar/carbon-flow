@@ -1,115 +1,116 @@
 "use client"
 
-import { useState, Suspense } from "react"
+import { useState, useEffect, Suspense } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { Sidebar } from "@/components/dashboard/sidebar"
-import { HeroBar } from "@/components/dashboard/hero-bar"
-import { KPIGrid } from "@/components/dashboard/kpi-grid"
-import { SensorMap } from "@/components/dashboard/sensor-map"
-import { AgentTabs } from "@/components/dashboard/agent-tabs"
-import { RightSidebar } from "@/components/dashboard/right-sidebar"
-import { Alert, AlertDescription } from "@/components/ui/alert"
-import { getStatus, getForecastLatest, getSensorsLatest, getAgentHistory, getForecastHistory } from "@/lib/api"
+import { RiskIndicator } from "@/components/patient/risk-indicator"
+import { RecommendationsCard } from "@/components/patient/recommendations-card"
+import {
+  getPatientStatus,
+  getRecommendations,
+  getRewards,
+  getCalendar,
+  createSession,
+  executeSession,
+} from "@/lib/api"
+import type { PatientState, Recommendations, RewardsStatus } from "@/lib/types"
+
+const PATIENT_ID = "patient-001" // In production, would come from auth
 
 function DashboardContent() {
+  const [sessionId, setSessionId] = useState<string | null>(null)
 
-  // Queries hit live API and surface empty states if unavailable
+  // Create session on mount
+  useEffect(() => {
+    createSession(PATIENT_ID).then((result) => {
+      setSessionId(result.session_id)
+      executeSession(result.session_id)
+    })
+  }, [])
+
   const statusQuery = useQuery({
-    queryKey: ["status"],
-    queryFn: getStatus,
+    queryKey: ["patient-status", PATIENT_ID],
+    queryFn: () => getPatientStatus(PATIENT_ID),
     retry: 1,
+    enabled: !!sessionId,
   })
 
-  const forecastQuery = useQuery({
-    queryKey: ["forecast"],
-    queryFn: getForecastLatest,
+  const recommendationsQuery = useQuery({
+    queryKey: ["recommendations", PATIENT_ID],
+    queryFn: () => getRecommendations(PATIENT_ID),
     retry: 1,
+    enabled: !!sessionId,
   })
 
-  const sensorsQuery = useQuery({
-    queryKey: ["sensors"],
-    queryFn: getSensorsLatest,
+  const rewardsQuery = useQuery({
+    queryKey: ["rewards", PATIENT_ID],
+    queryFn: () => getRewards(PATIENT_ID),
     retry: 1,
+    enabled: !!sessionId,
   })
 
-  const historyQuery = useQuery({
-    queryKey: ["agent-history"],
-    queryFn: getAgentHistory,
+  const calendarQuery = useQuery({
+    queryKey: ["calendar", PATIENT_ID],
+    queryFn: () => getCalendar(PATIENT_ID),
     retry: 1,
+    enabled: !!sessionId,
   })
 
-  const trendsQuery = useQuery({
-    queryKey: ["forecast-history"],
-    queryFn: () => getForecastHistory(7),
-    retry: 1,
-  })
+  const isLoading =
+    statusQuery.isLoading || recommendationsQuery.isLoading || rewardsQuery.isLoading
 
-  const statusError = statusQuery.isError || (!statusQuery.isLoading && !statusQuery.data)
-  const forecastError = forecastQuery.isError || (!forecastQuery.isLoading && !forecastQuery.data)
-  const sensorsError = sensorsQuery.isError || (!sensorsQuery.isLoading && !sensorsQuery.data)
-  const historyError = historyQuery.isError
-  const trendsError = trendsQuery.isError
-
-  const isLoading = statusQuery.isLoading || forecastQuery.isLoading || sensorsQuery.isLoading
-  const showGlobalError = statusError || forecastError || sensorsError
+  const patientState = statusQuery.data
+  const recommendations = recommendationsQuery.data
 
   return (
     <div className="flex min-h-screen bg-background">
-      {/* Left Sidebar */}
       <Sidebar />
+      <main className="flex-1 ml-[72px] p-6">
+        <div className="max-w-[1400px] mx-auto space-y-6">
+          <h1 className="text-3xl font-bold">Respiro Asthma Management</h1>
 
-      {/* Main Content */}
-      <main className="flex-1 ml-[72px] mr-80 p-6">
-        <div className="max-w-[1400px] mx-auto">
-          {showGlobalError && (
-            <Alert variant="destructive" className="mb-4">
-              <AlertDescription>
-                Live data could not be loaded from the API ({process.env.NEXT_PUBLIC_API_BASE_URL || "unknown host"}).
-                Check that the FastAPI server is running and reachable, then refresh.
-              </AlertDescription>
-            </Alert>
+          {isLoading && <div className="text-center py-8">Loading...</div>}
+
+          {patientState && (
+            <RiskIndicator
+              riskLevel={patientState.current_risk_level}
+              riskScore={patientState.risk_score}
+              riskFactors={patientState.risk_factors}
+            />
           )}
-          <HeroBar
-            status={statusQuery.data}
-            isLoading={statusQuery.isLoading}
-            hasError={statusError}
-          />
 
-          <KPIGrid
-            forecast={forecastQuery.data}
-            sensors={sensorsQuery.data}
-            isLoading={isLoading}
-            hasError={forecastError || sensorsError}
-          />
+          {recommendations && (
+            <RecommendationsCard recommendations={recommendations.recommendations} />
+          )}
 
-          <SensorMap
-            sensors={sensorsQuery.data}
-            forecast={forecastQuery.data}
-            isLoading={sensorsQuery.isLoading}
-            hasError={sensorsError}
-          />
-
-          <AgentTabs
-            forecast={forecastQuery.data}
-            history={historyQuery.data}
-            trendData={trendsQuery.data}
-            isLoading={isLoading}
-            forecastError={forecastError}
-            historyError={historyError}
-            trendsError={trendsError}
-          />
+          {rewardsQuery.data && (
+            <div className="rounded-lg border p-6">
+              <h3 className="text-xl font-bold mb-4">Rewards & Points</h3>
+              <p>Adherence Score: {(rewardsQuery.data.adherence_score * 100).toFixed(0)}%</p>
+              <p>Points: {rewardsQuery.data.points}</p>
+              {rewardsQuery.data.rewards.length > 0 && (
+                <div className="mt-4">
+                  <h4 className="font-semibold">Unlocked Rewards:</h4>
+                  <ul className="list-disc list-inside">
+                    {rewardsQuery.data.rewards.map((reward, idx) => (
+                      <li key={idx}>
+                        {reward.type}: {reward.value}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </main>
-
-      {/* Right Sidebar */}
-      <RightSidebar status={statusQuery.data} isLoading={statusQuery.isLoading} hasError={statusError} />
     </div>
   )
 }
 
 export default function DashboardPage() {
   return (
-    <Suspense fallback={<div className="flex items-center justify-center min-h-screen bg-background">Loading...</div>}>
+    <Suspense fallback={<div className="flex items-center justify-center min-h-screen">Loading...</div>}>
       <DashboardContent />
     </Suspense>
   )
