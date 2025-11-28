@@ -6,17 +6,13 @@ FastAPI server exposing Respiro agentic system endpoints.
 
 from __future__ import annotations
 
-import json
-import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional, Dict, List
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from respiro.orchestrator.main import get_orchestrator
-from respiro.orchestrator.state import create_initial_state
 from respiro.storage.s3_client import get_s3_client
 from respiro.config.settings import get_settings
 from respiro.utils.logging import get_logger
@@ -53,6 +49,29 @@ class UserFeedbackRequest(BaseModel):
     feedback: str
     category: str = "general"
     rating: Optional[int] = None
+
+def _utcnow_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _load_or_run_latest_state(patient_id: str) -> tuple[str, Dict[str, Any], str]:
+    """
+    Load the latest orchestrator state for a patient. If none exists yet,
+    create a session and execute the orchestrator once to bootstrap data.
+    """
+    s3_client = get_s3_client()
+    latest_session = s3_client.load_latest_session(patient_id)
+    if latest_session and latest_session.get("state"):
+        session_id = latest_session.get("session_id", "unknown")
+        state = latest_session["state"]
+        updated_at = latest_session.get("updated_at") or latest_session.get("created_at") or _utcnow_iso()
+        return session_id, state, updated_at
+
+    orchestrator = get_orchestrator()
+    session_id = orchestrator.create_session(patient_id)
+    state = orchestrator.execute(session_id)
+    return session_id, state, _utcnow_iso()
+
 
 # API Endpoints
 
@@ -94,29 +113,15 @@ async def execute_session(session_id: str):
 async def get_patient_status(patient_id: str):
     """Get current patient state with memory context."""
     try:
-        s3_client = get_s3_client()
-        patient_data = s3_client.load_patient_data(patient_id)
-        
-        # Load memory context
-        try:
-            from respiro.memory.vector_store import VectorStore
-            vector_store = VectorStore()
-            memories = vector_store.retrieve_memories(patient_id, "user preferences and interactions", n_results=5)
-            if patient_data:
-                patient_data["memory_context"] = {
-                    "recent_memories": memories,
-                    "memory_count": len(memories)
-                }
-            else:
-                patient_data = {"memory_context": {"recent_memories": memories, "memory_count": len(memories)}}
-        except Exception as e:
-            logger.warning(f"Failed to load memory context: {e}")
-            if patient_data:
-                patient_data["memory_context"] = {"recent_memories": [], "memory_count": 0}
-        
-        if not patient_data:
-            raise HTTPException(status_code=404, detail="Patient not found")
-        return patient_data
+        session_id, state, updated_at = _load_or_run_latest_state(patient_id)
+        return {
+            "patient_id": patient_id,
+            "session_id": session_id,
+            "current_risk_level": state.get("current_risk_level", "low"),
+            "risk_score": state.get("risk_score", 0.0),
+            "risk_factors": state.get("risk_factors", []),
+            "timestamp": state.get("timestamp", updated_at),
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -127,10 +132,25 @@ async def get_patient_status(patient_id: str):
 async def get_recommendations(patient_id: str):
     """Get clinical recommendations."""
     try:
-        s3_client = get_s3_client()
-        # Get latest recommendations
-        # Simplified - in production would query by timestamp
-        return {"recommendations": [], "timestamp": datetime.utcnow().isoformat()}
+        _, state, _ = _load_or_run_latest_state(patient_id)
+        clinical_output = state.get("clinical_output")
+        if not clinical_output:
+            clinical_output = {
+                "recommendations": state.get("clinical_recommendations"),
+                "zone": state.get("clinical_recommendations", {}).get("zone"),
+            }
+        recommendations = clinical_output.get("recommendations")
+        if not recommendations:
+            raise HTTPException(status_code=404, detail="Clinical recommendations unavailable")
+        return {
+            "zone": clinical_output.get("zone", recommendations.get("zone", "green")),
+            "risk_score": clinical_output.get("risk_score", state.get("risk_score", 0.0)),
+            "risk_level": clinical_output.get("risk_level", state.get("current_risk_level", "low")),
+            "risk_factors": clinical_output.get("risk_factors", state.get("risk_factors", [])),
+            "recommendations": recommendations,
+            "requires_approval": clinical_output.get("requires_approval", False),
+            "timestamp": clinical_output.get("timestamp", state.get("timestamp", _utcnow_iso())),
+        }
     except Exception as e:
         logger.error(f"Failed to get recommendations: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -139,9 +159,18 @@ async def get_recommendations(patient_id: str):
 async def get_calendar(patient_id: str):
     """Get calendar events."""
     try:
-        from respiro.integrations.calendar import GoogleCalendarClient
-        calendar = GoogleCalendarClient()
-        events = calendar.list_events()
+        _, state, _ = _load_or_run_latest_state(patient_id)
+        negotiator_output = state.get("negotiator_output", {})
+        events: List[Dict[str, Any]] = []
+        for idx, action in enumerate(negotiator_output.get("calendar_actions", [])):
+            event_time = action.get("new_time") or negotiator_output.get("timestamp") or _utcnow_iso()
+            events.append({
+                "id": action.get("event_id", f"event-{idx}"),
+                "summary": action.get("event_summary", "Rescheduled event"),
+                "start": {"dateTime": event_time, "timeZone": "UTC"},
+                "end": {"dateTime": event_time, "timeZone": "UTC"},
+                "description": f"Action: {action.get('action', 'update')}",
+            })
         return {"events": events}
     except Exception as e:
         logger.error(f"Failed to get calendar: {e}")
@@ -151,9 +180,16 @@ async def get_calendar(patient_id: str):
 async def get_rewards(patient_id: str):
     """Get rewards status."""
     try:
-        s3_client = get_s3_client()
-        # Get latest rewards data
-        return {"points": 0, "rewards": [], "adherence_score": 0.0}
+        _, state, _ = _load_or_run_latest_state(patient_id)
+        rewards_output = state.get("rewards_output")
+        if not rewards_output:
+            raise HTTPException(status_code=404, detail="Rewards data unavailable")
+        return {
+            "adherence_score": rewards_output.get("adherence_score", 0.0),
+            "points": rewards_output.get("points", 0),
+            "rewards": rewards_output.get("rewards", []),
+            "timestamp": rewards_output.get("timestamp", _utcnow_iso()),
+        }
     except Exception as e:
         logger.error(f"Failed to get rewards: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -211,11 +247,11 @@ async def submit_approval(patient_id: str, request: ApprovalRequest):
 async def get_trigger_detection(patient_id: str):
     """Get real-time trigger detection."""
     try:
-        # Execute Sentry agent
-        orchestrator = get_orchestrator()
-        session_id = orchestrator.create_session(patient_id)
-        state = orchestrator.execute(session_id)
-        return state.get("sentry_output", {})
+        _, state, _ = _load_or_run_latest_state(patient_id)
+        output = state.get("sentry_output")
+        if not output:
+            raise HTTPException(status_code=404, detail="Sentry output unavailable")
+        return output
     except Exception as e:
         logger.error(f"Failed to get trigger detection: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -224,6 +260,11 @@ async def get_trigger_detection(patient_id: str):
 async def get_action_plan(patient_id: str):
     """Get FHIR action plan."""
     try:
+        _, state, _ = _load_or_run_latest_state(patient_id)
+        clinical_output = state.get("clinical_output", {})
+        if clinical_output.get("action_plan"):
+            return clinical_output["action_plan"]
+
         from respiro.tools.fhir_tools import FHIRTools
         fhir_tools = FHIRTools()
         careplan_id = f"asthma-action-plan-{patient_id}"

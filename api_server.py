@@ -13,13 +13,18 @@ import io
 import contextlib
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from dotenv import load_dotenv
 from crewai import Crew, Process
+
+from respiro.orchestrator.main import get_orchestrator
+from respiro.storage.s3_client import get_s3_client
+from respiro.config.settings import get_settings
+from respiro.utils.logging import get_logger
 
 # Load environment variables
 project_root = Path(__file__).parent
@@ -80,6 +85,8 @@ def load_forecast_agent():
 
 # Initialize FastAPI app
 app = FastAPI(title="CarbonFlow API Server", version="1.0.0")
+
+logger = get_logger(__name__)
 
 # Enable CORS for Next.js frontend
 app.add_middleware(
@@ -627,6 +634,30 @@ def get_forecast_history(days: int = 7) -> list[dict[str, Any]]:
 
 
 # API Endpoints
+def _utcnow_iso() -> str:
+    return datetime.now(tz=timezone.utc).isoformat()
+
+
+def _load_or_run_latest_state(patient_id: str) -> Tuple[str, Dict[str, Any], str]:
+    """
+    Load the latest orchestrator state for a patient. If none exists yet,
+    create a session and execute the orchestrator once to bootstrap data.
+    """
+    s3_client = get_s3_client()
+    latest_session = s3_client.load_latest_session(patient_id)
+    if latest_session and latest_session.get("state"):
+        session_id = latest_session.get("session_id", "unknown")
+        state = latest_session["state"]
+        updated_at = latest_session.get("updated_at") or latest_session.get("created_at") or _utcnow_iso()
+        return session_id, state, updated_at
+
+    orchestrator = get_orchestrator()
+    session_id = orchestrator.create_session(patient_id)
+    state = orchestrator.execute(session_id)
+    return session_id, state, _utcnow_iso()
+
+
+# API Endpoints
 
 @app.get("/")
 async def root():
@@ -638,7 +669,9 @@ async def root():
             "status": "/api/status",
             "forecast": "/api/forecast/latest",
             "sensors": "/api/sensors/latest",
-            "logs": "/api/logs/recent"
+            "logs": "/api/logs/recent",
+            "respiro_sessions": "/api/sessions/create",
+            "respiro_status": "/api/patient/{patient_id}/status"
         }
     }
 
@@ -769,6 +802,126 @@ async def run_forecast_agent():
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to run forecast cycle: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
+# Respiro Orchestrator passthrough endpoints (frontend integration)
+# ---------------------------------------------------------------------------
+
+class SessionCreateRequest(BaseModel):
+    patient_id: str
+    initial_context: Optional[Dict[str, Any]] = None
+
+
+@app.post("/api/sessions/create")
+async def respiro_create_session(request: SessionCreateRequest):
+    """Create a new Respiro orchestrator session."""
+    try:
+        orchestrator = get_orchestrator()
+        session_id = orchestrator.create_session(request.patient_id, request.initial_context)
+        return {"session_id": session_id, "patient_id": request.patient_id}
+    except Exception as e:
+        logger.error(f"Failed to create session: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/sessions/{session_id}/execute")
+async def respiro_execute_session(session_id: str):
+    """Execute the Respiro orchestrator for a session."""
+    try:
+        orchestrator = get_orchestrator()
+        state = orchestrator.execute(session_id)
+        return {"session_id": session_id, "state": state}
+    except Exception as e:
+        logger.error(f"Failed to execute session: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/patient/{patient_id}/status")
+async def respiro_patient_status(patient_id: str):
+    """Expose current risk status for the frontend."""
+    try:
+        session_id, state, updated_at = _load_or_run_latest_state(patient_id)
+        return {
+            "patient_id": patient_id,
+            "session_id": session_id,
+            "current_risk_level": state.get("current_risk_level", "low"),
+            "risk_score": state.get("risk_score", 0.0),
+            "risk_factors": state.get("risk_factors", []),
+            "timestamp": state.get("timestamp", updated_at),
+        }
+    except Exception as e:
+        logger.error(f"Failed to get patient status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/patient/{patient_id}/recommendations")
+async def respiro_recommendations(patient_id: str):
+    """Expose latest clinical recommendations."""
+    try:
+        _, state, _ = _load_or_run_latest_state(patient_id)
+        clinical_output = state.get("clinical_output")
+        if not clinical_output:
+            clinical_output = {
+                "recommendations": state.get("clinical_recommendations"),
+                "zone": state.get("clinical_recommendations", {}).get("zone"),
+            }
+        recommendations = clinical_output.get("recommendations")
+        if not recommendations:
+            raise HTTPException(status_code=404, detail="Clinical recommendations unavailable")
+        return {
+            "zone": clinical_output.get("zone", recommendations.get("zone", "green")),
+            "risk_score": clinical_output.get("risk_score", state.get("risk_score", 0.0)),
+            "risk_level": clinical_output.get("risk_level", state.get("current_risk_level", "low")),
+            "risk_factors": clinical_output.get("risk_factors", state.get("risk_factors", [])),
+            "recommendations": recommendations,
+            "requires_approval": clinical_output.get("requires_approval", False),
+            "timestamp": clinical_output.get("timestamp", state.get("timestamp", _utcnow_iso())),
+        }
+    except Exception as e:
+        logger.error(f"Failed to get recommendations: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/patient/{patient_id}/calendar")
+async def respiro_calendar(patient_id: str):
+    """Expose Negotiator calendar actions as events."""
+    try:
+        _, state, _ = _load_or_run_latest_state(patient_id)
+        negotiator_output = state.get("negotiator_output", {})
+        events: List[Dict[str, Any]] = []
+        for idx, action in enumerate(negotiator_output.get("calendar_actions", [])):
+            event_time = action.get("new_time") or negotiator_output.get("timestamp") or _utcnow_iso()
+            events.append({
+                "id": action.get("event_id", f"event-{idx}"),
+                "summary": action.get("event_summary", "Rescheduled event"),
+                "start": {"dateTime": event_time, "timeZone": "UTC"},
+                "end": {"dateTime": event_time, "timeZone": "UTC"},
+                "description": f"Action: {action.get('action', 'update')}",
+            })
+        return {"events": events}
+    except Exception as e:
+        logger.error(f"Failed to get calendar: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/patient/{patient_id}/rewards")
+async def respiro_rewards(patient_id: str):
+    """Expose latest rewards output."""
+    try:
+        _, state, _ = _load_or_run_latest_state(patient_id)
+        rewards_output = state.get("rewards_output")
+        if not rewards_output:
+            raise HTTPException(status_code=404, detail="Rewards data unavailable")
+        return {
+            "adherence_score": rewards_output.get("adherence_score", 0.0),
+            "points": rewards_output.get("points", 0),
+            "rewards": rewards_output.get("rewards", []),
+            "timestamp": rewards_output.get("timestamp", _utcnow_iso()),
+        }
+    except Exception as e:
+        logger.error(f"Failed to get rewards: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":

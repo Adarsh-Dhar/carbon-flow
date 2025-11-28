@@ -151,26 +151,36 @@ class S3Client:
         return self.upload_json(key, memory_data, metadata=metadata)
     
     def save_session_log(self, session_id: str, log_data: Dict[str, Any]) -> bool:
-        """Save session log to S3."""
-        key = f"sessions/{session_id}/log.json"
-        metadata = {"session_id": session_id}
+        """Save session log to S3 grouped under the patient."""
+        patient_id = log_data.get("patient_id", "unknown")
+        key = f"sessions/{patient_id}/{session_id}/log.json"
+        metadata = {"session_id": session_id, "patient_id": patient_id}
         return self.upload_json(key, log_data, metadata=metadata)
     
     def list_patient_sessions(self, patient_id: str) -> List[str]:
         """List all session IDs for a patient."""
         prefix = f"sessions/{patient_id}/"
         try:
-            response = self.s3_client.list_objects_v2(
-                Bucket=self.bucket_name,
-                Prefix=prefix,
-                Delimiter='/'
-            )
-            sessions = []
-            if 'CommonPrefixes' in response:
-                for prefix_info in response['CommonPrefixes']:
-                    session_id = prefix_info['Prefix'].split('/')[-2]
+            paginator = self.s3_client.get_paginator("list_objects_v2")
+            sessions: List[str] = []
+            for page in paginator.paginate(Bucket=self.bucket_name, Prefix=prefix, Delimiter="/"):
+                for prefix_info in page.get("CommonPrefixes", []):
+                    session_id = prefix_info["Prefix"].split("/")[-2]
                     sessions.append(session_id)
-            return sessions
+            if sessions:
+                return sessions
+
+            # Legacy fallback: scan root sessions directory and match patient id
+            legacy_sessions: List[str] = []
+            for page in paginator.paginate(Bucket=self.bucket_name, Prefix="sessions/"):
+                for obj in page.get("Contents", []):
+                    key = obj["Key"]
+                    if not key.endswith("/log.json"):
+                        continue
+                    log_data = self.download_json(key)
+                    if log_data and log_data.get("patient_id") == patient_id:
+                        legacy_sessions.append(key.split("/")[-2])
+            return legacy_sessions
         except Exception as e:
             logger.error(f"Failed to list sessions for patient {patient_id}: {e}")
             return []
@@ -195,7 +205,11 @@ class S3Client:
             latest_timestamp = None
             
             for session_id in sessions:
-                log_data = self.download_json(f"sessions/{session_id}/log.json")
+                log_data = self.download_json(f"sessions/{patient_id}/{session_id}/log.json")
+                if not log_data:
+                    # Fallback for legacy layout without patient prefix
+                    legacy_key = f"sessions/{session_id}/log.json"
+                    log_data = self.download_json(legacy_key)
                 if log_data:
                     updated_at = log_data.get("updated_at") or log_data.get("created_at")
                     if updated_at:

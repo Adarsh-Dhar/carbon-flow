@@ -3,15 +3,16 @@ import type { Metadata, Viewport } from "next"
 import { Geist, Geist_Mono } from "next/font/google"
 import { Analytics } from "@vercel/analytics/next"
 import { Providers } from "@/components/providers"
+import "mapbox-gl/dist/mapbox-gl.css"
 import "./globals.css"
 
 const _geist = Geist({ subsets: ["latin"] })
 const _geistMono = Geist_Mono({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: "CarbonFlow Delhi Command Center",
-  description: "Autonomous Air Quality Governance Dashboard for Delhi NCR",
-  generator: "v0.app",
+  title: "Respiro | Agentic Asthma Guardian",
+  description: "Multi-agent respiratory guardian blending clinical insight, sentry awareness, and negotiator actions.",
+  generator: "Respiro",
   icons: {
     icon: [
       {
@@ -43,7 +44,7 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en" className="dark" suppressHydrationWarning>
       <body className="font-sans antialiased">
         <Providers>{children}</Providers>
         <Analytics />

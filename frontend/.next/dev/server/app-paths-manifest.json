@@ -1,3 +1,5 @@
 {
+  "/(dashboard)/feed/page": "app/(dashboard)/feed/page.js",
+  "/(dashboard)/insights/page": "app/(dashboard)/insights/page.js",
   "/(dashboard)/page": "app/(dashboard)/page.js"
 }
