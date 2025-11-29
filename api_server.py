@@ -12,6 +12,8 @@ import importlib.util
 import io
 import contextlib
 from datetime import datetime, timezone, timedelta
+import threading
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -21,10 +23,13 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 from crewai import Crew, Process
 
-from respiro.orchestrator.main import get_orchestrator
+from respiro.data import SFDatasetBuilder
 from respiro.storage.s3_client import get_s3_client
 from respiro.config.settings import get_settings
 from respiro.utils.logging import get_logger
+from respiro.tools.route_service import RouteIntelligenceService
+from respiro.integrations.purpleair import PurpleAirClient
+from respiro.tools.sf_routing_engine import pm25_to_aqi
 
 # Load environment variables
 project_root = Path(__file__).parent
@@ -87,6 +92,128 @@ def load_forecast_agent():
 app = FastAPI(title="CarbonFlow API Server", version="1.0.0")
 
 logger = get_logger(__name__)
+
+_sf_refresh_thread: Optional[threading.Thread] = None
+_sf_refresh_stop = threading.Event()
+_sf_dataset_builder: Optional[SFDatasetBuilder] = None
+_route_service: Optional[RouteIntelligenceService] = None
+
+
+def _start_sf_refresh_worker() -> None:
+    global _sf_refresh_thread, _sf_dataset_builder
+    if _sf_refresh_thread and _sf_refresh_thread.is_alive():
+        return
+    _sf_refresh_stop.clear()
+    _sf_dataset_builder = SFDatasetBuilder()
+
+    def _worker() -> None:
+        logger.info("Starting SF dataset refresh worker")
+        while not _sf_refresh_stop.is_set():
+            try:
+                _sf_dataset_builder.refresh_realtime_layers()
+            except Exception as exc:  # pragma: no cover - background guard
+                logger.error("SF refresh worker failed: %s", exc)
+            finally:
+                _sf_refresh_stop.wait(900)  # 15 minutes
+        logger.info("SF dataset refresh worker stopped")
+
+    _sf_refresh_thread = threading.Thread(target=_worker, name="sf-dataset-refresh", daemon=True)
+    _sf_refresh_thread.start()
+
+
+def _stop_sf_refresh_worker() -> None:
+    if not _sf_refresh_thread:
+        return
+    _sf_refresh_stop.set()
+    _sf_refresh_thread.join(timeout=5)
+
+
+def _get_orchestrator():
+    """Lazy import of orchestrator to avoid requiring langgraph at startup."""
+    try:
+        from respiro.orchestrator.main import get_orchestrator
+        return get_orchestrator()
+    except ImportError as e:
+        raise RuntimeError(
+            "Orchestrator requires langgraph. Install with: pip install langgraph"
+        ) from e
+
+
+def _get_route_service() -> RouteIntelligenceService:
+    global _route_service
+    if _route_service is None:
+        _route_service = RouteIntelligenceService()
+    return _route_service
+
+
+@app.get("/api/purpleair/sensors")
+async def get_purpleair_sensors() -> Dict[str, Any]:
+    """Get real-time PurpleAir sensor data for San Francisco as GeoJSON.
+
+    This is a lightweight proxy used by the dashboard heatmap. If the PurpleAir
+    API key is missing or the upstream call fails, we degrade gracefully and
+    return an empty FeatureCollection instead of surfacing a 5xx.
+    """
+    try:
+        client = PurpleAirClient()
+        sensors = client.fetch_sf_sensors()
+
+        features = []
+        for sensor in sensors:
+            try:
+                lat = float(sensor.get("latitude", 0))
+                lon = float(sensor.get("longitude", 0))
+                pm25 = float(sensor.get("pm25_corrected") or sensor.get("pm2.5_alt") or 0.0)
+                aqi = pm25_to_aqi(pm25)
+
+                features.append(
+                    {
+                        "type": "Feature",
+                        "geometry": {
+                            "type": "Point",
+                            "coordinates": [lon, lat],
+                        },
+                        "properties": {
+                            "pm25": pm25,
+                            "aqi": aqi,
+                            "sensor_id": sensor.get("sensor_index"),
+                            "location_type": sensor.get("location_type"),
+                        },
+                    }
+                )
+            except Exception:
+                # Skip bad records but continue building the collection
+                continue
+
+        return {
+            "type": "FeatureCollection",
+            "features": features,
+        }
+    except Exception as e:
+        logger.error(f"Failed to fetch PurpleAir sensors: {e}")
+        # Graceful degradation – frontend can simply skip heatmap update
+        return {
+            "type": "FeatureCollection",
+            "features": [],
+        }
+
+
+def _parse_latlon(value: str) -> tuple[float, float]:
+    try:
+        lat_str, lon_str = value.split(",")
+        return float(lat_str), float(lon_str)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid coordinate '{value}'") from exc
+
+
+@app.on_event("startup")
+async def _startup_event() -> None:
+    _start_sf_refresh_worker()
+
+
+@app.on_event("shutdown")
+async def _shutdown_event() -> None:
+    _stop_sf_refresh_worker()
 
 # Enable CORS for Next.js frontend
 app.add_middleware(
@@ -651,7 +778,7 @@ def _load_or_run_latest_state(patient_id: str) -> Tuple[str, Dict[str, Any], str
         updated_at = latest_session.get("updated_at") or latest_session.get("created_at") or _utcnow_iso()
         return session_id, state, updated_at
 
-    orchestrator = get_orchestrator()
+    orchestrator = _get_orchestrator()
     session_id = orchestrator.create_session(patient_id)
     state = orchestrator.execute(session_id)
     return session_id, state, _utcnow_iso()
@@ -817,7 +944,7 @@ class SessionCreateRequest(BaseModel):
 async def respiro_create_session(request: SessionCreateRequest):
     """Create a new Respiro orchestrator session."""
     try:
-        orchestrator = get_orchestrator()
+        orchestrator = _get_orchestrator()
         session_id = orchestrator.create_session(request.patient_id, request.initial_context)
         return {"session_id": session_id, "patient_id": request.patient_id}
     except Exception as e:
@@ -829,7 +956,7 @@ async def respiro_create_session(request: SessionCreateRequest):
 async def respiro_execute_session(session_id: str):
     """Execute the Respiro orchestrator for a session."""
     try:
-        orchestrator = get_orchestrator()
+        orchestrator = _get_orchestrator()
         state = orchestrator.execute(session_id)
         return {"session_id": session_id, "state": state}
     except Exception as e:
@@ -921,6 +1048,25 @@ async def respiro_rewards(patient_id: str):
         }
     except Exception as e:
         logger.error(f"Failed to get rewards: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/route")
+async def clean_route(
+    start: str,
+    end: str,
+    sensitivity: str = "asthma",
+) -> Dict[str, Any]:
+    """Expose fastest vs cleanest route intelligence from the SF engine."""
+    try:
+        origin = _parse_latlon(start)
+        destination = _parse_latlon(end)
+        service = _get_route_service()
+        return service.build_intelligence(origin, destination, sensitivity)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to compute route intelligence: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

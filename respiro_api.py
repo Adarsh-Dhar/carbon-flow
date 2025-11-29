@@ -7,15 +7,15 @@ FastAPI server exposing Respiro agentic system endpoints.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Optional, Dict, List
+from typing import Any, Optional, Dict, List, Tuple
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from respiro.orchestrator.main import get_orchestrator
 from respiro.storage.s3_client import get_s3_client
-from respiro.config.settings import get_settings
 from respiro.utils.logging import get_logger
+from respiro.tools.route_service import RouteIntelligenceService
 
 logger = get_logger(__name__)
 
@@ -54,6 +54,9 @@ def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+_route_service: Optional[RouteIntelligenceService] = None
+
+
 def _load_or_run_latest_state(patient_id: str) -> tuple[str, Dict[str, Any], str]:
     """
     Load the latest orchestrator state for a patient. If none exists yet,
@@ -71,6 +74,21 @@ def _load_or_run_latest_state(patient_id: str) -> tuple[str, Dict[str, Any], str
     session_id = orchestrator.create_session(patient_id)
     state = orchestrator.execute(session_id)
     return session_id, state, _utcnow_iso()
+
+
+def _get_route_service() -> RouteIntelligenceService:
+    global _route_service
+    if _route_service is None:
+        _route_service = RouteIntelligenceService()
+    return _route_service
+
+
+def _parse_latlon(value: str) -> Tuple[float, float]:
+    try:
+        lat_str, lon_str = value.split(",")
+        return float(lat_str), float(lon_str)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid coordinate '{value}'") from exc
 
 
 # API Endpoints
@@ -242,6 +260,72 @@ async def submit_approval(patient_id: str, request: ApprovalRequest):
     except Exception as e:
         logger.error(f"Failed to submit approval: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/route")
+async def get_route(
+    start: str,
+    end: str,
+    sensitivity: str = "asthma",
+) -> Dict[str, Any]:
+    """Compute fastest vs cleanest route intelligence."""
+    try:
+        origin = _parse_latlon(start)
+        destination = _parse_latlon(end)
+        service = _get_route_service()
+        return service.build_intelligence(origin, destination, sensitivity)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to compute route: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/purpleair/sensors")
+async def get_purpleair_sensors() -> Dict[str, Any]:
+    """Get real-time PurpleAir sensor data for San Francisco as GeoJSON."""
+    try:
+        from respiro.integrations.purpleair import PurpleAirClient
+        from respiro.tools.sf_routing_engine import pm25_to_aqi
+        
+        client = PurpleAirClient()
+        sensors = client.fetch_sf_sensors()
+        
+        # Convert to GeoJSON FeatureCollection
+        features = []
+        for sensor in sensors:
+            try:
+                lat = float(sensor.get("latitude", 0))
+                lon = float(sensor.get("longitude", 0))
+                pm25 = float(sensor.get("pm25_corrected") or sensor.get("pm2.5_alt") or 0.0)
+                aqi = pm25_to_aqi(pm25)
+                
+                features.append({
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "Point",
+                        "coordinates": [lon, lat]
+                    },
+                    "properties": {
+                        "sensor_id": sensor.get("sensor_index") or sensor.get("sensor_id"),
+                        "pm25": pm25,
+                        "aqi": aqi,
+                        "humidity": float(sensor.get("humidity", 0)),
+                        "last_seen": sensor.get("last_seen"),
+                    }
+                })
+            except (TypeError, ValueError) as e:
+                logger.warning(f"Skipping invalid sensor data: {e}")
+                continue
+        
+        return {
+            "type": "FeatureCollection",
+            "features": features
+        }
+    except Exception as e:
+        logger.error(f"Failed to fetch PurpleAir sensors: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/api/agent/sentry/trigger")
 async def get_trigger_detection(patient_id: str):

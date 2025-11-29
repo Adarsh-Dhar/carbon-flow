@@ -65,11 +65,14 @@ class RespiroState(TypedDict, total=False):
     # Context and Data
     context: Dict[str, Any]  # General context data
     sensor_data: Dict[str, Any]  # Fused sensor data from Sentry
+    wind_context: Dict[str, Any]  # Wind + humidity context
+    pollen_alerts: List[Dict[str, Any]]  # Alerts from meteorologist
     clinical_recommendations: Dict[str, Any]  # Recommendations from Clinical agent
     negotiator_response: Optional[str]  # Response from Negotiator agent
     rewards_status: Dict[str, Any]  # Status from Rewards agent
     iot_actions: List[Dict[str, Any]]  # IoT device actions taken
     route_recommendations: List[Dict[str, Any]]  # Route optimization recommendations
+    calendar_suggestions: List[Dict[str, Any]]  # Planned reschedules (Calendar Sentry)
     
     # Memory and Personalization
     memory_retrieval: List[Dict[str, Any]]  # Retrieved memories from vector store
@@ -82,6 +85,9 @@ class RespiroState(TypedDict, total=False):
     
     # Agent Outputs
     sentry_output: Optional[Dict[str, Any]]
+    meteorology_output: Optional[Dict[str, Any]]
+    cartographer_output: Optional[Dict[str, Any]]
+    navigator_output: Optional[Dict[str, Any]]
     clinical_output: Optional[Dict[str, Any]]
     negotiator_output: Optional[Dict[str, Any]]
     rewards_output: Optional[Dict[str, Any]]
@@ -137,17 +143,23 @@ def create_initial_state(
         interrupt_type=None,
         context=initial_context or {},
         sensor_data={},
+        wind_context={},
+        pollen_alerts=[],
         clinical_recommendations={},
         negotiator_response=None,
         rewards_status={},
         iot_actions=[],
         route_recommendations=[],
+        calendar_suggestions=[],
         memory_retrieval=[],
         user_preferences={},
         human_approval_required=False,
         approval_requests=[],
         approval_responses={},
         sentry_output=None,
+        meteorology_output=None,
+        cartographer_output=None,
+        navigator_output=None,
         clinical_output=None,
         negotiator_output=None,
         rewards_output=None,

@@ -14,7 +14,6 @@ from typing import Any, Optional, Dict
 import json
 
 from respiro.config.settings import get_settings
-from respiro.storage.s3_client import get_s3_client
 
 
 class StructuredFormatter(logging.Formatter):
@@ -53,6 +52,8 @@ class S3LogHandler(logging.Handler):
     
     def __init__(self, level=logging.INFO):
         super().__init__(level)
+        # Lazy import to avoid circular dependency
+        from respiro.storage.s3_client import get_s3_client
         self.s3_client = get_s3_client()
         self.log_buffer = []
         self.buffer_size = 100

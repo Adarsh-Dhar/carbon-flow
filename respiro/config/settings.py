@@ -99,12 +99,18 @@ class APISettings(BaseSettings):
     model_config = {"env_prefix": ""}
     
     google_aqi_api_key: Optional[str] = Field(default=None)
+    google_pollen_api_key: Optional[str] = Field(default=None)
     ambee_api_key: Optional[str] = Field(default=None)
     insurance_api_base_url: Optional[str] = Field(default=None)
     insurance_api_key: Optional[str] = Field(default=None)
     pharmacy_api_base_url: Optional[str] = Field(default=None)
     pharmacy_api_key: Optional[str] = Field(default=None)
     google_maps_api_key: Optional[str] = Field(default=None)
+    purpleair_api_key: Optional[str] = Field(default=None)
+    earth_engine_service_account: Optional[str] = Field(default=None)
+    earth_engine_private_key_path: Optional[str] = Field(default=None)
+    open_meteo_base_url: str = Field(default="https://api.open-meteo.com/v1/forecast")
+    mapbox_access_token: Optional[str] = Field(default=None)
 
 
 class AppSettings(BaseSettings):
@@ -164,7 +170,7 @@ class RespiroSettings:
             backup_s3_prefix=os.getenv("VECTOR_DB_BACKUP_S3_PREFIX", "memory-backups/")
         )
         self.openai = OpenAISettings(
-            api_key=os.getenv("OPENAI_API_KEY", ""),
+            api_key=os.getenv("GEMINI_API_KEY", ""),
             model=os.getenv("OPENAI_MODEL", "text-embedding-3-small")
         )
         self.fhir = FHIRSettings(
@@ -173,12 +179,18 @@ class RespiroSettings:
         )
         self.api = APISettings(
             google_aqi_api_key=os.getenv("GOOGLE_AQI_API_KEY"),
+            google_pollen_api_key=os.getenv("GOOGLE_POLLEN_API_KEY"),
             ambee_api_key=os.getenv("AMBEE_API_KEY"),
             insurance_api_base_url=os.getenv("INSURANCE_API_BASE_URL"),
             insurance_api_key=os.getenv("INSURANCE_API_KEY"),
             pharmacy_api_base_url=os.getenv("PHARMACY_API_BASE_URL"),
             pharmacy_api_key=os.getenv("PHARMACY_API_KEY"),
-            google_maps_api_key=os.getenv("GOOGLE_MAPS_API_KEY")
+            google_maps_api_key=os.getenv("GOOGLE_MAPS_API_KEY"),
+            purpleair_api_key=os.getenv("PURPLEAIR_API_KEY"),
+            earth_engine_service_account=os.getenv("EARTH_ENGINE_SERVICE_ACCOUNT"),
+            earth_engine_private_key_path=os.getenv("EARTH_ENGINE_PRIVATE_KEY_PATH"),
+            open_meteo_base_url=os.getenv("OPEN_METEO_BASE_URL", "https://api.open-meteo.com/v1/forecast"),
+            mapbox_access_token=os.getenv("MAPBOX_ACCESS_TOKEN")
         )
         self.app = AppSettings(
             api_server_host=os.getenv("API_SERVER_HOST", "localhost"),
@@ -210,7 +222,7 @@ class RespiroSettings:
         if not self.iot.endpoint:
             errors.append("AWS_IOT_ENDPOINT is required")
         if not self.openai.api_key:
-            errors.append("OPENAI_API_KEY is required")
+            errors.append("GEMINI_API_KEY is required")
         
         return errors
 

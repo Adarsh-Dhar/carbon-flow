@@ -24,6 +24,8 @@ Respiro transforms asthma care from a passive "digital diary" into an **active, 
 
 - **Safety First:** Implements "Human-in-the-Loop" checks for critical medical interventions, preventing AI hallucinations in high-stakes scenarios.
 
+- **San Francisco Clean-Air Routing:** Builds an OSMnx graph enriched with elevation, Aclima baselines, and real-time PurpleAir data to compute "fastest vs cleanest" commutes, complete with Wind Breaker, Fog Guard, and Calendar Sentry reasoning.
+
 ## Setup
 
 ### Prerequisites
@@ -31,7 +33,7 @@ Respiro transforms asthma care from a passive "digital diary" into an **active, 
 - Python 3.11+
 - Node.js 18+ (for frontend)
 - AWS Account with Bedrock, IoT Core, and S3 access
-- API keys for: Google Calendar, HealthKit/Fitbit, Ambee, Google AQI, OpenAI
+- API keys for: Google Calendar, HealthKit/Fitbit, Ambee, Google AQI, OpenAI, PurpleAir, Google Pollen, Mapbox, Open-Meteo (public)
 
 ### Installation
 
@@ -69,6 +71,11 @@ See `.env.example` for complete list. Key variables:
 - `OPENAI_API_KEY` - OpenAI API key for embeddings
 - `AWS_IOT_ENDPOINT` - AWS IoT Core endpoint
 - `S3_BUCKET_NAME` - S3 bucket for data storage
+- `PURPLEAIR_API_KEY` - PurpleAir API token for hyper-local PM2.5
+- `GOOGLE_POLLEN_API_KEY` - Google Pollen Forecast API key
+- `EARTH_ENGINE_SERVICE_ACCOUNT` + `EARTH_ENGINE_PRIVATE_KEY_PATH` - Earth Engine credentials for Aclima exports
+- `MAPBOX_ACCESS_TOKEN` / `NEXT_PUBLIC_MAPBOX_TOKEN` - Mapbox tokens for backend + frontend visualization
+- `OPEN_METEO_BASE_URL` - Optional override for Open-Meteo (defaults to official API)
 
 ### Running the Application
 
@@ -84,6 +91,14 @@ pnpm dev
 ```
 
 3. Access the application at `http://localhost:3000`
+
+### Building the San Francisco Routing Dataset
+
+```bash
+python -m respiro.data.sf_dataset
+```
+
+The command downloads the OSMnx street network, attaches elevation + grade metadata, and caches PurpleAir/Aclima layers under `respiro/data_cache/sf_routing`. A background worker inside `api_server.py` refreshes PurpleAir snapshots every 15 minutes so the `RouteIntelligenceService` can serve low-latency requests.
 
 ## API Documentation
 
@@ -105,6 +120,10 @@ pnpm dev
 
 - `GET /api/agent/sentry/trigger` - Get real-time trigger detection
 - `GET /api/agent/clinical/action-plan` - Get FHIR action plan
+
+### Routing
+
+- `GET /api/route?start=lat,lon&end=lat,lon&sensitivity=asthma` - Returns fastest vs cleanest GeoJSON routes plus meteorology context.
 
 ### WebSocket
 
